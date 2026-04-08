@@ -380,6 +380,111 @@ function LogView({
 // Main Page
 // =============================================================================
 
+function DestinationAutosuggest({
+	value,
+	onChange,
+	disabled,
+}: {
+	value: string;
+	onChange: (v: string) => void;
+	disabled?: boolean;
+}) {
+	const [query, setQuery] = React.useState("");
+	const [items, setItems] = React.useState<PostSuggestion[]>([]);
+	const [open, setOpen] = React.useState(false);
+
+	React.useEffect(() => {
+		if (!query.trim()) {
+			setItems([]);
+			return;
+		}
+		const controller = new AbortController();
+		const timer = setTimeout(() => {
+			searchPostSuggestions(query, controller.signal)
+				.then(setItems)
+				.catch(() => {
+					// Swallow: suggestions are a convenience, not critical.
+				});
+		}, 250);
+		return () => {
+			clearTimeout(timer);
+			controller.abort();
+		};
+	}, [query]);
+
+	const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+		const v = e.target.value;
+		onChange(v);
+		setQuery(v.startsWith("/") ? v.slice(1) : v);
+		setOpen(true);
+	};
+
+	const handlePick = (item: PostSuggestion) => {
+		const slug = item.slug ?? "";
+		onChange(`/${slug}`);
+		setOpen(false);
+	};
+
+	return (
+		<div style={{ position: "relative" }}>
+			<Input
+				placeholder="/destination-path"
+				value={value}
+				onChange={handleChange}
+				onFocus={() => setOpen(true)}
+				onBlur={() => setTimeout(() => setOpen(false), 150)}
+				disabled={disabled}
+				style={{ width: "100%" }}
+			/>
+			{open && items.length > 0 && (
+				<div
+					style={{
+						position: "absolute",
+						top: "100%",
+						left: 0,
+						right: 0,
+						background: "var(--color-bg, #fff)",
+						border: "1px solid var(--color-border, #e5e7eb)",
+						borderRadius: 6,
+						marginTop: 4,
+						maxHeight: 240,
+						overflowY: "auto",
+						zIndex: 10,
+						boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+					}}
+				>
+					{items.map((item) => (
+						<button
+							key={`${item.collection}:${item.id}`}
+							type="button"
+							onMouseDown={(e) => {
+								e.preventDefault();
+							}}
+							onClick={() => handlePick(item)}
+							style={{
+								display: "block",
+								width: "100%",
+								textAlign: "left",
+								padding: "8px 12px",
+								border: "none",
+								background: "transparent",
+								cursor: "pointer",
+								fontSize: 13,
+								borderBottom: "1px solid var(--color-border, #f3f4f6)",
+							}}
+						>
+							<div style={{ fontWeight: 600 }}>{item.title ?? "(untitled)"}</div>
+							<div style={{ color: "var(--color-text-secondary, #9ca3af)", fontSize: 12, fontFamily: "var(--font-mono, monospace)" }}>
+								/{item.collection}/{item.slug ?? item.id}
+							</div>
+						</button>
+					))}
+				</div>
+			)}
+		</div>
+	);
+}
+
 function isAdminRole(role: string | number | null | undefined): boolean {
 	if (role == null) return false;
 	if (typeof role === "string") return role.toLowerCase() === "admin";
