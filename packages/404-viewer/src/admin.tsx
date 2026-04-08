@@ -33,6 +33,48 @@ interface NotFoundSummary {
 
 type ViewMode = "summary" | "log";
 
+// Mirrors core's Redirect row (packages/core/src/database/repositories/redirect.ts)
+interface Redirect {
+	id: string;
+	source: string;
+	destination: string;
+	type: number;
+	isPattern: boolean;
+	enabled: boolean;
+	hits: number;
+	lastHitAt: string | null;
+	groupName: string | null;
+	auto: boolean;
+	createdAt: string;
+	updatedAt: string;
+}
+
+interface CreateRedirectInput {
+	source: string;
+	destination: string;
+	type: number;
+	enabled: boolean;
+	groupName?: string | null;
+}
+
+// Subset of GET /_emdash/api/auth/me we actually use.
+// NOTE: role shape is assumed based on plan guidance — core's RoleLevel is
+// numeric with admin == 80. If core changes this, update isAdminRole below.
+interface CurrentUser {
+	id: string;
+	email: string;
+	name: string | null;
+	role: string | number;
+}
+
+// Subset of GET /_emdash/api/search SearchResult we actually use
+interface PostSuggestion {
+	id: string;
+	collection: string;
+	slug: string | null;
+	title: string | null;
+}
+
 // =============================================================================
 // API Helpers
 // =============================================================================
