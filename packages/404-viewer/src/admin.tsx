@@ -380,6 +380,14 @@ function LogView({
 // Main Page
 // =============================================================================
 
+function isAdminRole(role: string | number | null | undefined): boolean {
+	if (role == null) return false;
+	if (typeof role === "string") return role.toLowerCase() === "admin";
+	// ASSUMPTION: core's RoleLevel uses numeric levels; admin is the highest
+	// common level (80). If core changes this threshold, update here.
+	return role >= 80;
+}
+
 function NotFoundPage() {
 	const [view, setView] = React.useState<ViewMode>("summary");
 	const [search, setSearch] = React.useState("");
@@ -393,6 +401,8 @@ function NotFoundPage() {
 	const [logItems, setLogItems] = React.useState<NotFoundEntry[]>([]);
 	const [logCursor, setLogCursor] = React.useState<string | null>(null);
 	const [loadingMore, setLoadingMore] = React.useState(false);
+
+	const [canManageRedirects, setCanManageRedirects] = React.useState(false);
 
 	const loadSummary = React.useCallback(async () => {
 		setLoading(true);
@@ -439,6 +449,17 @@ function NotFoundPage() {
 		if (view === "summary") loadSummary();
 		else loadLog();
 	}, [view, loadSummary, loadLog]);
+
+	React.useEffect(() => {
+		let cancelled = false;
+		fetchCurrentUser().then((user) => {
+			if (cancelled) return;
+			setCanManageRedirects(isAdminRole(user?.role));
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, []);
 
 	const handleClear = async () => {
 		if (!confirm("Clear all 404 log entries? This cannot be undone.")) return;
