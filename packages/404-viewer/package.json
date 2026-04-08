@@ -1,6 +1,6 @@
 {
   "name": "@devondragon/emdash-plugin-404-viewer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "EmDash admin plugin: viewer for the built-in 404 log table",
   "license": "MIT",
   "author": "Devon Hillard <devon@devondragon.com>",
@@ -11,7 +11,13 @@
     "directory": "packages/404-viewer"
   },
   "bugs": "https://github.com/devondragon/emdash-plugins/issues",
-  "keywords": ["emdash", "emdash-plugin", "cms", "404", "admin"],
+  "keywords": [
+    "emdash",
+    "emdash-plugin",
+    "cms",
+    "404",
+    "admin"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -25,8 +31,14 @@
       "import": "./dist/admin.js"
     }
   },
-  "files": ["dist", "README.md", "LICENSE"],
-  "publishConfig": { "access": "public" },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsdown",
     "dev": "tsdown --watch",
