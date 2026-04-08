@@ -8,7 +8,7 @@
 import { Badge, Button, Input, Loader } from "@cloudflare/kumo";
 import { Trash, MagnifyingGlass, FunnelSimple } from "@phosphor-icons/react";
 import type { PluginAdminExports } from "emdash";
-import { apiFetch } from "emdash/plugin-utils";
+import { apiFetch, getErrorMessage, parseApiResponse } from "emdash/plugin-utils";
 import * as React from "react";
 
 // =============================================================================
@@ -123,6 +123,48 @@ async function pruneOlderThan(olderThan: string): Promise<number> {
 	if (!res.ok) throw new Error(`Failed to prune 404 log: ${res.status}`);
 	const json = await res.json();
 	return json.data?.deleted ?? 0;
+}
+
+const REDIRECTS_BASE = "/_emdash/api/redirects";
+
+async function createRedirect(input: CreateRedirectInput): Promise<Redirect> {
+	const res = await apiFetch(REDIRECTS_BASE, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(input),
+	});
+	if (!res.ok) {
+		throw new Error(await getErrorMessage(res, "Failed to create redirect"));
+	}
+	return parseApiResponse<Redirect>(res, "Failed to create redirect");
+}
+
+async function fetchCurrentUser(): Promise<CurrentUser | null> {
+	try {
+		const res = await fetch("/_emdash/api/auth/me", { credentials: "same-origin" });
+		if (!res.ok) return null;
+		const json = (await res.json()) as { data?: CurrentUser };
+		return json.data ?? null;
+	} catch {
+		return null;
+	}
+}
+
+async function searchPostSuggestions(
+	q: string,
+	signal?: AbortSignal,
+): Promise<PostSuggestion[]> {
+	if (!q.trim()) return [];
+	const params = new URLSearchParams({ q, limit: "8" });
+	const res = await fetch(`/_emdash/api/search?${params}`, {
+		credentials: "same-origin",
+		signal,
+	});
+	if (!res.ok) return [];
+	const json = (await res.json()) as {
+		data?: { items?: PostSuggestion[] };
+	};
+	return json.data?.items ?? [];
 }
 
 // =============================================================================
