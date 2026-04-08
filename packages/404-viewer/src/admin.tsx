@@ -278,7 +278,18 @@ const styles = {
 // Summary View
 // =============================================================================
 
-function SummaryView({ items, onRefresh }: { items: NotFoundSummary[]; onRefresh: () => void }) {
+function SummaryView({
+	items,
+	onRefresh,
+	canCreateRedirect,
+	onCreateRedirect,
+}: {
+	items: NotFoundSummary[];
+	onRefresh: () => void;
+	canCreateRedirect: boolean;
+	onCreateRedirect: (path: string) => void;
+}) {
+	void onRefresh;
 	if (items.length === 0) {
 		return (
 			<div style={styles.empty}>
@@ -296,6 +307,7 @@ function SummaryView({ items, onRefresh }: { items: NotFoundSummary[]; onRefresh
 					<th style={{ ...styles.th, textAlign: "right" }}>Hits</th>
 					<th style={styles.th}>Last Seen</th>
 					<th style={styles.th}>Top Referrer</th>
+					{canCreateRedirect && <th style={styles.th} aria-label="Actions" />}
 				</tr>
 			</thead>
 			<tbody>
@@ -311,6 +323,16 @@ function SummaryView({ items, onRefresh }: { items: NotFoundSummary[]; onRefresh
 						<td style={{ ...styles.td, ...styles.muted }}>
 							{item.topReferrer ? truncate(item.topReferrer, 50) : "—"}
 						</td>
+						{canCreateRedirect && (
+							<td style={{ ...styles.td, textAlign: "right", whiteSpace: "nowrap" }}>
+								<Button
+									variant="outline"
+									onClick={() => onCreateRedirect(item.path)}
+								>
+									→ Redirect
+								</Button>
+							</td>
+						)}
 					</tr>
 				))}
 			</tbody>
@@ -327,11 +349,15 @@ function LogView({
 	cursor,
 	loading,
 	onLoadMore,
+	canCreateRedirect,
+	onCreateRedirect,
 }: {
 	items: NotFoundEntry[];
 	cursor: string | null;
 	loading: boolean;
 	onLoadMore: () => void;
+	canCreateRedirect: boolean;
+	onCreateRedirect: (path: string) => void;
 }) {
 	if (items.length === 0 && !loading) {
 		return (
@@ -349,6 +375,7 @@ function LogView({
 						<th style={styles.th}>Path</th>
 						<th style={styles.th}>Referrer</th>
 						<th style={styles.th}>Time</th>
+						{canCreateRedirect && <th style={styles.th} aria-label="Actions" />}
 					</tr>
 				</thead>
 				<tbody>
@@ -361,6 +388,16 @@ function LogView({
 							<td style={{ ...styles.td, ...styles.muted, whiteSpace: "nowrap" }}>
 								{timeAgo(entry.createdAt)}
 							</td>
+							{canCreateRedirect && (
+								<td style={{ ...styles.td, textAlign: "right", whiteSpace: "nowrap" }}>
+									<Button
+										variant="outline"
+										onClick={() => onCreateRedirect(entry.path)}
+									>
+										→ Redirect
+									</Button>
+								</td>
+							)}
 						</tr>
 					))}
 				</tbody>
@@ -760,6 +797,8 @@ function NotFoundPage() {
 	const [loadingMore, setLoadingMore] = React.useState(false);
 
 	const [canManageRedirects, setCanManageRedirects] = React.useState(false);
+	const [modalOpen, setModalOpen] = React.useState(false);
+	const [modalSource, setModalSource] = React.useState("");
 
 	const loadSummary = React.useCallback(async () => {
 		setLoading(true);
@@ -817,6 +856,20 @@ function NotFoundPage() {
 			cancelled = true;
 		};
 	}, []);
+
+	const openCreateRedirect = React.useCallback((path: string) => {
+		setModalSource(path);
+		setModalOpen(true);
+	}, []);
+
+	const closeCreateRedirect = React.useCallback(() => {
+		setModalOpen(false);
+	}, []);
+
+	const handleRedirectCreated = React.useCallback(() => {
+		if (view === "summary") loadSummary();
+		else loadLog();
+	}, [view, loadSummary, loadLog]);
 
 	const handleClear = async () => {
 		if (!confirm("Clear all 404 log entries? This cannot be undone.")) return;
@@ -900,15 +953,29 @@ function NotFoundPage() {
 					<Loader />
 				</div>
 			) : view === "summary" ? (
-				<SummaryView items={summary} onRefresh={loadSummary} />
+				<SummaryView
+					items={summary}
+					onRefresh={loadSummary}
+					canCreateRedirect={canManageRedirects}
+					onCreateRedirect={openCreateRedirect}
+				/>
 			) : (
 				<LogView
 					items={logItems}
 					cursor={logCursor}
 					loading={loadingMore}
 					onLoadMore={() => loadLog(true, logCursor ?? undefined)}
+					canCreateRedirect={canManageRedirects}
+					onCreateRedirect={openCreateRedirect}
 				/>
 			)}
+
+			<CreateRedirectModal
+				open={modalOpen}
+				initialSource={modalSource}
+				onClose={closeCreateRedirect}
+				onSuccess={handleRedirectCreated}
+			/>
 		</div>
 	);
 }
