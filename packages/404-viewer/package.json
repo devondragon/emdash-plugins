@@ -1,0 +1,50 @@
+{
+  "name": "@devondragon/emdash-plugin-404-viewer",
+  "version": "0.1.0",
+  "description": "EmDash admin plugin: viewer for the built-in 404 log table",
+  "license": "MIT",
+  "author": "Devon Hillard <devon@devondragon.com>",
+  "homepage": "https://github.com/devondragon/emdash-plugins/tree/main/packages/404-viewer#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/devondragon/emdash-plugins.git",
+    "directory": "packages/404-viewer"
+  },
+  "bugs": "https://github.com/devondragon/emdash-plugins/issues",
+  "keywords": ["emdash", "emdash-plugin", "cms", "404", "admin"],
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./admin": {
+      "types": "./dist/admin.d.ts",
+      "import": "./dist/admin.js"
+    }
+  },
+  "files": ["dist", "README.md", "LICENSE"],
+  "publishConfig": { "access": "public" },
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "emdash": "^0.1.0",
+    "react": "^19.0.0",
+    "@cloudflare/kumo": "^1.0.0",
+    "@phosphor-icons/react": "^2.1.10"
+  },
+  "devDependencies": {
+    "@cloudflare/kumo": "^1.17.0",
+    "@phosphor-icons/react": "^2.1.10",
+    "@types/react": "^19.2.14",
+    "emdash": "^0.1.0",
+    "react": "^19.2.4",
+    "tsdown": "^0.21.0",
+    "typescript": "^5.9.3"
+  }
+}
