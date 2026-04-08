@@ -549,6 +549,13 @@ function CreateRedirectModal({
 	const [submitting, setSubmitting] = React.useState(false);
 	const [error, setError] = React.useState<string | null>(null);
 	const [successNote, setSuccessNote] = React.useState<string | null>(null);
+	const closeTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+	React.useEffect(() => {
+		return () => {
+			if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+		};
+	}, []);
 
 	React.useEffect(() => {
 		if (open) {
@@ -589,12 +596,12 @@ function CreateRedirectModal({
 			await createRedirect({ source, destination, type, enabled });
 			if (clearMatching) {
 				setSuccessNote(
-					"Redirect created. Matching 404 log entries will stop accumulating as soon as requests start resolving. (Per-path cleanup of existing log rows is pending a core API change.)",
+					"Redirect created. Existing 404 log entries for this path are not deleted (per-path cleanup is pending a core API change); new requests should now resolve via the redirect.",
 				);
 			} else {
 				setSuccessNote("Redirect created.");
 			}
-			setTimeout(() => {
+			closeTimerRef.current = setTimeout(() => {
 				onSuccess();
 				onClose();
 			}, 1200);
@@ -728,7 +735,7 @@ function CreateRedirectModal({
 							onChange={(e) => setClearMatching(e.target.checked)}
 							disabled={submitting}
 						/>
-						<span>Clear matching 404 log entries after creating</span>
+						<span>Clear matching 404 log entries after creating (pending core support)</span>
 					</label>
 				</div>
 
