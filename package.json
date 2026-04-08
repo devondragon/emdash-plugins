@@ -1,0 +1,26 @@
+{
+  "name": "emdash-plugins",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Monorepo for EmDash CMS plugins by Devon Hillard",
+  "license": "MIT",
+  "author": "Devon Hillard <devon@devondragon.com>",
+  "homepage": "https://github.com/devondragon/emdash-plugins",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/devondragon/emdash-plugins.git"
+  },
+  "scripts": {
+    "build": "pnpm -r --filter \"./packages/*\" build",
+    "typecheck": "pnpm -r --filter \"./packages/*\" typecheck",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "pnpm build && changeset publish"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.27.10",
+    "tsdown": "^0.7.0",
+    "typescript": "^5.9.3"
+  },
+  "packageManager": "pnpm@9.15.0"
+}
