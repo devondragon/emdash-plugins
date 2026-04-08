@@ -343,7 +343,9 @@ function NotFoundPage() {
 
 	// Dialog state
 	const [clearOpen, setClearOpen] = React.useState(false);
+	const [clearInFlight, setClearInFlight] = React.useState(false);
 	const [pruneOpen, setPruneOpen] = React.useState(false);
+	const [pruneInFlight, setPruneInFlight] = React.useState(false);
 	const [pruneDays, setPruneDays] = React.useState("30");
 	const [pruneError, setPruneError] = React.useState<string | null>(null);
 
@@ -396,9 +398,11 @@ function NotFoundPage() {
 	}, [view, loadSummary, loadLog]);
 
 	const handleClearConfirm = async () => {
+		if (clearInFlight) return;
 		// Mutually exclude notice/error so the two banners never show together.
 		setError(null);
 		setNotice(null);
+		setClearInFlight(true);
 		try {
 			const deleted = await clearAll();
 			setSummary([]);
@@ -412,18 +416,23 @@ function NotFoundPage() {
 			// Resync: a partial server-side delete would otherwise leave the UI showing stale rows.
 			if (view === "summary") loadSummary();
 			else loadLog({ search: search || undefined });
+		} finally {
+			setClearInFlight(false);
 		}
 	};
 
 	const handlePruneConfirm = async () => {
-		const d = parseInt(pruneDays, 10);
-		if (isNaN(d) || d < 1) {
+		if (pruneInFlight) return;
+		const trimmed = pruneDays.trim();
+		const d = Number(trimmed);
+		if (trimmed.length === 0 || !Number.isFinite(d) || !Number.isInteger(d) || d < 1) {
 			setPruneError("Enter a valid number of days.");
 			return;
 		}
 		setPruneError(null);
 		setError(null);
 		setNotice(null);
+		setPruneInFlight(true);
 		const olderThan = new Date(Date.now() - d * 86400000).toISOString();
 		try {
 			const deleted = await pruneOlderThan(olderThan);
@@ -437,6 +446,8 @@ function NotFoundPage() {
 			setPruneError(describeError("prune 404 log", err));
 			if (view === "summary") loadSummary();
 			else loadLog({ search: search || undefined });
+		} finally {
+			setPruneInFlight(false);
 		}
 	};
 
@@ -519,21 +530,23 @@ function NotFoundPage() {
 			)}
 
 			{/* Clear All confirmation */}
-			<Dialog.Root role="alertdialog" open={clearOpen} onOpenChange={setClearOpen}>
+			<Dialog.Root role="alertdialog" open={clearOpen} onOpenChange={(open) => { if (!clearInFlight) setClearOpen(open); }}>
 				<Dialog>
 					<Dialog.Title>Clear all 404 log entries?</Dialog.Title>
 					<Dialog.Description>
 						This will permanently delete every entry in the 404 log. This action cannot be undone.
 					</Dialog.Description>
 					<div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
-						<Dialog.Close render={(p: React.ButtonHTMLAttributes<HTMLButtonElement>) => <Button variant="secondary" {...p}>Cancel</Button>} />
-						<Button variant="destructive" onClick={handleClearConfirm}>Clear all</Button>
+						<Dialog.Close render={(p: React.ButtonHTMLAttributes<HTMLButtonElement>) => <Button variant="secondary" disabled={clearInFlight} {...p}>Cancel</Button>} />
+						<Button variant="destructive" onClick={handleClearConfirm} disabled={clearInFlight}>
+							{clearInFlight ? <Loader /> : "Clear all"}
+						</Button>
 					</div>
 				</Dialog>
 			</Dialog.Root>
 
 			{/* Prune dialog */}
-			<Dialog.Root role="alertdialog" open={pruneOpen} onOpenChange={setPruneOpen}>
+			<Dialog.Root role="alertdialog" open={pruneOpen} onOpenChange={(open) => { if (!pruneInFlight) setPruneOpen(open); }}>
 				<Dialog>
 					<Dialog.Title>Prune old entries</Dialog.Title>
 					<Dialog.Description>
@@ -554,14 +567,17 @@ function NotFoundPage() {
 							min={1}
 							value={pruneDays}
 							onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPruneDays(e.target.value)}
+							disabled={pruneInFlight}
 							autoFocus
 						/>
 						{pruneError && (
 							<div style={{ color: "#dc2626", fontSize: 12, marginTop: 6 }}>{pruneError}</div>
 						)}
 						<div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
-							<Dialog.Close render={(p: React.ButtonHTMLAttributes<HTMLButtonElement>) => <Button variant="secondary" type="button" {...p}>Cancel</Button>} />
-							<Button variant="destructive" type="submit">Prune</Button>
+							<Dialog.Close render={(p: React.ButtonHTMLAttributes<HTMLButtonElement>) => <Button variant="secondary" type="button" disabled={pruneInFlight} {...p}>Cancel</Button>} />
+							<Button variant="destructive" type="submit" disabled={pruneInFlight}>
+								{pruneInFlight ? <Loader /> : "Prune"}
+							</Button>
 						</div>
 					</form>
 				</Dialog>
