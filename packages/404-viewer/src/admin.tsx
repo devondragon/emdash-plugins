@@ -5,7 +5,7 @@
  * Fetches from the existing /_emdash/api/redirects/404s endpoints.
  */
 
-import { Badge, Button, Input, Loader } from "@cloudflare/kumo";
+import { Badge, Button, Dialog, Input, Loader } from "@cloudflare/kumo";
 import { Trash, MagnifyingGlass, FunnelSimple } from "@phosphor-icons/react";
 import type { PluginAdminExports } from "emdash";
 import { apiFetch } from "emdash/plugin-utils";
@@ -39,11 +39,33 @@ type ViewMode = "summary" | "log";
 
 const API_BASE = "/_emdash/api/redirects/404s";
 
+/**
+ * Build an Error from a non-OK response. Tries to extract a server-provided
+ * message from the JSON error envelope or plain text body, falling back to
+ * the HTTP status when neither is available.
+ */
+async function apiError(action: string, res: Response): Promise<Error> {
+	let detail = "";
+	try {
+		const text = await res.text();
+		if (text) {
+			try {
+				const parsed = JSON.parse(text);
+				detail = parsed?.error?.message ?? parsed?.message ?? text;
+			} catch {
+				detail = text;
+			}
+		}
+	} catch {
+		// ignore body read failures
+	}
+	const suffix = detail ? `: ${detail}` : "";
+	return new Error(`Failed to ${action} (${res.status})${suffix}`);
+}
+
 async function fetchSummary(limit = 100): Promise<NotFoundSummary[]> {
-	const res = await fetch(`${API_BASE}/summary?limit=${limit}`, {
-		credentials: "same-origin",
-	});
-	if (!res.ok) throw new Error(`Failed to fetch 404 summary: ${res.status}`);
+	const res = await apiFetch(`${API_BASE}/summary?limit=${limit}`);
+	if (!res.ok) throw await apiError("fetch 404 summary", res);
 	const json = await res.json();
 	return json.data?.items ?? [];
 }
@@ -57,17 +79,15 @@ async function fetchLog(opts: {
 	if (opts.limit) params.set("limit", String(opts.limit));
 	if (opts.cursor) params.set("cursor", opts.cursor);
 	if (opts.search) params.set("search", opts.search);
-	const res = await fetch(`${API_BASE}?${params}`, {
-		credentials: "same-origin",
-	});
-	if (!res.ok) throw new Error(`Failed to fetch 404 log: ${res.status}`);
+	const res = await apiFetch(`${API_BASE}?${params}`);
+	if (!res.ok) throw await apiError("fetch 404 log", res);
 	const json = await res.json();
 	return { items: json.data?.items ?? [], cursor: json.data?.cursor ?? null };
 }
 
 async function clearAll(): Promise<number> {
 	const res = await apiFetch(API_BASE, { method: "DELETE" });
-	if (!res.ok) throw new Error(`Failed to clear 404 log: ${res.status}`);
+	if (!res.ok) throw await apiError("clear 404 log", res);
 	const json = await res.json();
 	return json.data?.deleted ?? 0;
 }
@@ -78,7 +98,7 @@ async function pruneOlderThan(olderThan: string): Promise<number> {
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({ olderThan }),
 	});
-	if (!res.ok) throw new Error(`Failed to prune 404 log: ${res.status}`);
+	if (!res.ok) throw await apiError("prune 404 log", res);
 	const json = await res.json();
 	return json.data?.deleted ?? 0;
 }
@@ -296,11 +316,22 @@ function LogView({
 // Main Page
 // =============================================================================
 
+function errorMessage(err: unknown): string {
+	return err instanceof Error ? err.message : String(err);
+}
+
+function describeError(action: string, err: unknown): string {
+	const msg = errorMessage(err);
+	// Avoid double-prefixing when the thrown Error already starts with "Failed to …"
+	return msg.startsWith("Failed to ") ? msg : `Failed to ${action}: ${msg}`;
+}
+
 function NotFoundPage() {
 	const [view, setView] = React.useState<ViewMode>("summary");
 	const [search, setSearch] = React.useState("");
 	const [loading, setLoading] = React.useState(true);
 	const [error, setError] = React.useState<string | null>(null);
+	const [notice, setNotice] = React.useState<string | null>(null);
 
 	// Summary state
 	const [summary, setSummary] = React.useState<NotFoundSummary[]>([]);
@@ -310,84 +341,119 @@ function NotFoundPage() {
 	const [logCursor, setLogCursor] = React.useState<string | null>(null);
 	const [loadingMore, setLoadingMore] = React.useState(false);
 
+	// Dialog state
+	const [clearOpen, setClearOpen] = React.useState(false);
+	const [clearInFlight, setClearInFlight] = React.useState(false);
+	const [pruneOpen, setPruneOpen] = React.useState(false);
+	const [pruneInFlight, setPruneInFlight] = React.useState(false);
+	const [pruneDays, setPruneDays] = React.useState("30");
+	const [pruneError, setPruneError] = React.useState<string | null>(null);
+
 	const loadSummary = React.useCallback(async () => {
 		setLoading(true);
 		setError(null);
 		try {
 			const items = await fetchSummary();
 			setSummary(items);
-		} catch (e: any) {
-			setError(e.message);
+		} catch (err) {
+			setError(describeError("load 404 summary", err));
 		} finally {
 			setLoading(false);
 		}
 	}, []);
 
 	const loadLog = React.useCallback(
-		async (append = false, cursor?: string) => {
-			if (append) setLoadingMore(true);
+		async (opts: { append?: boolean; cursor?: string; search?: string } = {}) => {
+			if (opts.append) setLoadingMore(true);
 			else setLoading(true);
 			setError(null);
 			try {
 				const result = await fetchLog({
 					limit: 50,
-					cursor,
-					search: search || undefined,
+					cursor: opts.cursor,
+					search: opts.search || undefined,
 				});
-				if (append) {
+				if (opts.append) {
 					setLogItems((prev) => [...prev, ...result.items]);
 				} else {
 					setLogItems(result.items);
 				}
 				setLogCursor(result.cursor);
-			} catch (e: any) {
-				setError(e.message);
+			} catch (err) {
+				setError(describeError("load 404 log", err));
 			} finally {
 				setLoading(false);
 				setLoadingMore(false);
 			}
 		},
-		[search],
+		[],
 	);
 
-	// Load data on mount and view change
+	// Load data on mount and view change (no search dep — search is explicit via form submit).
+	// Also clears any lingering success notice from a prior view's action.
 	React.useEffect(() => {
+		setNotice(null);
 		if (view === "summary") loadSummary();
 		else loadLog();
 	}, [view, loadSummary, loadLog]);
 
-	const handleClear = async () => {
-		if (!confirm("Clear all 404 log entries? This cannot be undone.")) return;
+	const handleClearConfirm = async () => {
+		if (clearInFlight) return;
+		// Mutually exclude notice/error so the two banners never show together.
+		setError(null);
+		setNotice(null);
+		setClearInFlight(true);
 		try {
 			const deleted = await clearAll();
 			setSummary([]);
 			setLogItems([]);
 			setLogCursor(null);
-			alert(`Cleared ${deleted} entries.`);
-		} catch (e: any) {
-			alert(`Error: ${e.message}`);
+			setNotice(`Cleared ${deleted} ${deleted === 1 ? "entry" : "entries"}.`);
+			setClearOpen(false);
+		} catch (err) {
+			setError(describeError("clear 404 log", err));
+			setClearOpen(false);
+			// Resync: a partial server-side delete would otherwise leave the UI showing stale rows.
+			if (view === "summary") loadSummary();
+			else loadLog({ search: search || undefined });
+		} finally {
+			setClearInFlight(false);
 		}
 	};
 
-	const handlePrune = async () => {
-		const days = prompt("Delete entries older than how many days?", "30");
-		if (!days) return;
-		const d = parseInt(days, 10);
-		if (isNaN(d) || d < 1) return alert("Enter a valid number of days.");
+	const handlePruneConfirm = async () => {
+		if (pruneInFlight) return;
+		const trimmed = pruneDays.trim();
+		const d = Number(trimmed);
+		if (trimmed.length === 0 || !Number.isFinite(d) || !Number.isInteger(d) || d < 1) {
+			setPruneError("Enter a valid number of days.");
+			return;
+		}
+		setPruneError(null);
+		setError(null);
+		setNotice(null);
+		setPruneInFlight(true);
 		const olderThan = new Date(Date.now() - d * 86400000).toISOString();
 		try {
 			const deleted = await pruneOlderThan(olderThan);
-			alert(`Pruned ${deleted} entries older than ${d} days.`);
+			setNotice(`Pruned ${deleted} ${deleted === 1 ? "entry" : "entries"} older than ${d} days.`);
+			setPruneOpen(false);
 			if (view === "summary") loadSummary();
-			else loadLog();
-		} catch (e: any) {
-			alert(`Error: ${e.message}`);
+			else loadLog({ search: search || undefined });
+		} catch (err) {
+			// Keep the dialog open and surface the error inline so the user keeps their day count
+			// and can retry. Also resync the main view in case the prune partially applied.
+			setPruneError(describeError("prune 404 log", err));
+			if (view === "summary") loadSummary();
+			else loadLog({ search: search || undefined });
+		} finally {
+			setPruneInFlight(false);
 		}
 	};
 
 	const handleSearch = (e: React.FormEvent) => {
 		e.preventDefault();
-		loadLog();
+		loadLog({ search: search || undefined });
 	};
 
 	return (
@@ -395,10 +461,10 @@ function NotFoundPage() {
 			<div style={styles.header}>
 				<h2 style={styles.title}>404 Log</h2>
 				<div style={styles.controls}>
-					<Button variant="outline" onClick={handlePrune}>
+					<Button variant="outline" onClick={() => { setPruneError(null); setPruneOpen(true); }}>
 						<FunnelSimple size={14} /> Prune
 					</Button>
-					<Button variant="outline" onClick={handleClear}>
+					<Button variant="outline" onClick={() => setClearOpen(true)}>
 						<Trash size={14} /> Clear All
 					</Button>
 				</div>
@@ -433,6 +499,19 @@ function NotFoundPage() {
 				</div>
 			)}
 
+			{notice && (
+				<div style={{ padding: 12, background: "#f0fdf4", borderRadius: 6, color: "#15803d", marginBottom: 12, fontSize: 13, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+					<span>{notice}</span>
+					<button
+						onClick={() => setNotice(null)}
+						style={{ background: "transparent", border: "none", cursor: "pointer", color: "inherit", fontSize: 16, lineHeight: 1 }}
+						aria-label="Dismiss"
+					>
+						×
+					</button>
+				</div>
+			)}
+
 			{loading ? (
 				<div style={{ display: "flex", justifyContent: "center", padding: 40 }}>
 					<Loader />
@@ -444,9 +523,65 @@ function NotFoundPage() {
 					items={logItems}
 					cursor={logCursor}
 					loading={loadingMore}
-					onLoadMore={() => loadLog(true, logCursor ?? undefined)}
+					onLoadMore={() =>
+						loadLog({ append: true, cursor: logCursor ?? undefined, search: search || undefined })
+					}
 				/>
 			)}
+
+			{/* Clear All confirmation */}
+			<Dialog.Root role="alertdialog" open={clearOpen} onOpenChange={(open) => { if (!clearInFlight) setClearOpen(open); }}>
+				<Dialog>
+					<Dialog.Title>Clear all 404 log entries?</Dialog.Title>
+					<Dialog.Description>
+						This will permanently delete every entry in the 404 log. This action cannot be undone.
+					</Dialog.Description>
+					<div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+						<Dialog.Close render={(p: React.ButtonHTMLAttributes<HTMLButtonElement>) => <Button variant="secondary" disabled={clearInFlight} {...p}>Cancel</Button>} />
+						<Button variant="destructive" onClick={handleClearConfirm} disabled={clearInFlight}>
+							{clearInFlight ? <Loader /> : "Clear all"}
+						</Button>
+					</div>
+				</Dialog>
+			</Dialog.Root>
+
+			{/* Prune dialog */}
+			<Dialog.Root role="alertdialog" open={pruneOpen} onOpenChange={(open) => { if (!pruneInFlight) setPruneOpen(open); }}>
+				<Dialog>
+					<Dialog.Title>Prune old entries</Dialog.Title>
+					<Dialog.Description>
+						Delete 404 log entries older than the number of days below.
+					</Dialog.Description>
+					<form
+						onSubmit={(e) => {
+							e.preventDefault();
+							handlePruneConfirm();
+						}}
+						style={{ marginTop: 12 }}
+					>
+						<label style={{ display: "block", fontSize: 13, marginBottom: 6 }}>
+							Older than (days)
+						</label>
+						<Input
+							type="number"
+							min={1}
+							value={pruneDays}
+							onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPruneDays(e.target.value)}
+							disabled={pruneInFlight}
+							autoFocus
+						/>
+						{pruneError && (
+							<div style={{ color: "#dc2626", fontSize: 12, marginTop: 6 }}>{pruneError}</div>
+						)}
+						<div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+							<Dialog.Close render={(p: React.ButtonHTMLAttributes<HTMLButtonElement>) => <Button variant="secondary" type="button" disabled={pruneInFlight} {...p}>Cancel</Button>} />
+							<Button variant="destructive" type="submit" disabled={pruneInFlight}>
+								{pruneInFlight ? <Loader /> : "Prune"}
+							</Button>
+						</div>
+					</form>
+				</Dialog>
+			</Dialog.Root>
 		</div>
 	);
 }
