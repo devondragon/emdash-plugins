@@ -485,6 +485,258 @@ function DestinationAutosuggest({
 	);
 }
 
+const REDIRECT_TYPES = [
+	{ value: 301, label: "301 Permanent" },
+	{ value: 302, label: "302 Found" },
+	{ value: 307, label: "307 Temporary" },
+	{ value: 308, label: "308 Permanent" },
+];
+
+function CreateRedirectModal({
+	open,
+	initialSource,
+	onClose,
+	onSuccess,
+}: {
+	open: boolean;
+	initialSource: string;
+	onClose: () => void;
+	onSuccess: () => void;
+}) {
+	const [source, setSource] = React.useState(initialSource);
+	const [destination, setDestination] = React.useState("");
+	const [type, setType] = React.useState(301);
+	const [enabled, setEnabled] = React.useState(true);
+	const [isPattern, setIsPattern] = React.useState(false);
+	const [clearMatching, setClearMatching] = React.useState(true);
+	const [submitting, setSubmitting] = React.useState(false);
+	const [error, setError] = React.useState<string | null>(null);
+	const [successNote, setSuccessNote] = React.useState<string | null>(null);
+
+	React.useEffect(() => {
+		if (open) {
+			setSource(initialSource);
+			setDestination("");
+			setType(301);
+			setEnabled(true);
+			setIsPattern(false);
+			setClearMatching(true);
+			setError(null);
+			setSuccessNote(null);
+			setSubmitting(false);
+		}
+	}, [open, initialSource]);
+
+	if (!open) return null;
+
+	const handleSubmit = async (e: React.FormEvent) => {
+		e.preventDefault();
+		setError(null);
+		setSuccessNote(null);
+
+		if (!source.startsWith("/") || source.startsWith("//")) {
+			setError("Source must start with / and cannot be protocol-relative.");
+			return;
+		}
+		if (!destination.startsWith("/") || destination.startsWith("//")) {
+			setError("Destination must start with / and cannot be protocol-relative.");
+			return;
+		}
+		if (source === destination) {
+			setError("Source and destination must be different.");
+			return;
+		}
+
+		setSubmitting(true);
+		try {
+			await createRedirect({ source, destination, type, enabled });
+			if (clearMatching) {
+				setSuccessNote(
+					"Redirect created. Matching 404 log entries will stop accumulating as soon as requests start resolving. (Per-path cleanup of existing log rows is pending a core API change.)",
+				);
+			} else {
+				setSuccessNote("Redirect created.");
+			}
+			setTimeout(() => {
+				onSuccess();
+				onClose();
+			}, 1200);
+		} catch (err) {
+			setError(err instanceof Error ? err.message : "Failed to create redirect.");
+		} finally {
+			setSubmitting(false);
+		}
+	};
+
+	return (
+		<div
+			role="dialog"
+			aria-modal="true"
+			style={{
+				position: "fixed",
+				inset: 0,
+				background: "rgba(0,0,0,0.4)",
+				display: "flex",
+				alignItems: "center",
+				justifyContent: "center",
+				zIndex: 1000,
+			}}
+			onClick={(e) => {
+				if (e.target === e.currentTarget && !submitting) onClose();
+			}}
+		>
+			<form
+				onSubmit={handleSubmit}
+				style={{
+					background: "var(--color-bg, #fff)",
+					borderRadius: 8,
+					padding: 24,
+					width: "min(520px, 92vw)",
+					maxHeight: "90vh",
+					overflowY: "auto",
+					boxShadow: "0 20px 50px rgba(0,0,0,0.25)",
+				}}
+			>
+				<h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 600 }}>
+					Create Redirect
+				</h3>
+
+				<div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+					<label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
+						<span style={{ fontWeight: 600 }}>Source</span>
+						<Input
+							value={source}
+							onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSource(e.target.value)}
+							disabled={submitting}
+							style={{ fontFamily: "var(--font-mono, monospace)" }}
+						/>
+						{isPattern && (
+							<span style={{ color: "var(--color-text-secondary, #9ca3af)", fontSize: 12 }}>
+								Use <code>[param]</code> for segments, <code>[...rest]</code> for catch-all.
+							</span>
+						)}
+					</label>
+
+					<label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
+						<span style={{ fontWeight: 600 }}>Destination</span>
+						{isPattern ? (
+							<>
+								<Input
+									value={destination}
+									onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+										setDestination(e.target.value)
+									}
+									disabled={submitting}
+									style={{ fontFamily: "var(--font-mono, monospace)" }}
+									placeholder="/new-path/[...rest]"
+								/>
+								<span style={{ color: "var(--color-text-secondary, #9ca3af)", fontSize: 12 }}>
+									Reference the same <code>[param]</code> / <code>[...rest]</code> names from the source.
+								</span>
+							</>
+						) : (
+							<DestinationAutosuggest
+								value={destination}
+								onChange={setDestination}
+								disabled={submitting}
+							/>
+						)}
+					</label>
+
+					<label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
+						<span style={{ fontWeight: 600 }}>Type</span>
+						<select
+							value={type}
+							onChange={(e) => setType(parseInt(e.target.value, 10))}
+							disabled={submitting}
+							style={{
+								padding: "6px 8px",
+								borderRadius: 6,
+								border: "1px solid var(--color-border, #e5e7eb)",
+								fontSize: 13,
+							}}
+						>
+							{REDIRECT_TYPES.map((t) => (
+								<option key={t.value} value={t.value}>
+									{t.label}
+								</option>
+							))}
+						</select>
+					</label>
+
+					<label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+						<input
+							type="checkbox"
+							checked={enabled}
+							onChange={(e) => setEnabled(e.target.checked)}
+							disabled={submitting}
+						/>
+						<span>Enabled</span>
+					</label>
+
+					<label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+						<input
+							type="checkbox"
+							checked={isPattern}
+							onChange={(e) => setIsPattern(e.target.checked)}
+							disabled={submitting}
+						/>
+						<span>Use as pattern (Astro route syntax)</span>
+					</label>
+
+					<label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+						<input
+							type="checkbox"
+							checked={clearMatching}
+							onChange={(e) => setClearMatching(e.target.checked)}
+							disabled={submitting}
+						/>
+						<span>Clear matching 404 log entries after creating</span>
+					</label>
+				</div>
+
+				{error && (
+					<div
+						style={{
+							marginTop: 12,
+							padding: 10,
+							background: "#fef2f2",
+							color: "#dc2626",
+							borderRadius: 6,
+							fontSize: 13,
+						}}
+					>
+						{error}
+					</div>
+				)}
+				{successNote && (
+					<div
+						style={{
+							marginTop: 12,
+							padding: 10,
+							background: "#f0fdf4",
+							color: "#15803d",
+							borderRadius: 6,
+							fontSize: 13,
+						}}
+					>
+						{successNote}
+					</div>
+				)}
+
+				<div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20 }}>
+					<Button variant="outline" type="button" onClick={onClose} disabled={submitting}>
+						Cancel
+					</Button>
+					<Button type="submit" disabled={submitting}>
+						{submitting ? <Loader /> : "Create Redirect"}
+					</Button>
+				</div>
+			</form>
+		</div>
+	);
+}
+
 function isAdminRole(role: string | number | null | undefined): boolean {
 	if (role == null) return false;
 	if (typeof role === "string") return role.toLowerCase() === "admin";
