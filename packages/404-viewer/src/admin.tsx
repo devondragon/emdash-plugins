@@ -39,9 +39,33 @@ type ViewMode = "summary" | "log";
 
 const API_BASE = "/_emdash/api/redirects/404s";
 
+/**
+ * Build an Error from a non-OK response. Tries to extract a server-provided
+ * message from the JSON error envelope or plain text body, falling back to
+ * the HTTP status when neither is available.
+ */
+async function apiError(action: string, res: Response): Promise<Error> {
+	let detail = "";
+	try {
+		const text = await res.text();
+		if (text) {
+			try {
+				const parsed = JSON.parse(text);
+				detail = parsed?.error?.message ?? parsed?.message ?? text;
+			} catch {
+				detail = text;
+			}
+		}
+	} catch {
+		// ignore body read failures
+	}
+	const suffix = detail ? `: ${detail}` : "";
+	return new Error(`Failed to ${action} (${res.status})${suffix}`);
+}
+
 async function fetchSummary(limit = 100): Promise<NotFoundSummary[]> {
 	const res = await apiFetch(`${API_BASE}/summary?limit=${limit}`);
-	if (!res.ok) throw new Error(`Failed to fetch 404 summary: ${res.status}`);
+	if (!res.ok) throw await apiError("fetch 404 summary", res);
 	const json = await res.json();
 	return json.data?.items ?? [];
 }
@@ -56,14 +80,14 @@ async function fetchLog(opts: {
 	if (opts.cursor) params.set("cursor", opts.cursor);
 	if (opts.search) params.set("search", opts.search);
 	const res = await apiFetch(`${API_BASE}?${params}`);
-	if (!res.ok) throw new Error(`Failed to fetch 404 log: ${res.status}`);
+	if (!res.ok) throw await apiError("fetch 404 log", res);
 	const json = await res.json();
 	return { items: json.data?.items ?? [], cursor: json.data?.cursor ?? null };
 }
 
 async function clearAll(): Promise<number> {
 	const res = await apiFetch(API_BASE, { method: "DELETE" });
-	if (!res.ok) throw new Error(`Failed to clear 404 log: ${res.status}`);
+	if (!res.ok) throw await apiError("clear 404 log", res);
 	const json = await res.json();
 	return json.data?.deleted ?? 0;
 }
@@ -74,7 +98,7 @@ async function pruneOlderThan(olderThan: string): Promise<number> {
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({ olderThan }),
 	});
-	if (!res.ok) throw new Error(`Failed to prune 404 log: ${res.status}`);
+	if (!res.ok) throw await apiError("prune 404 log", res);
 	const json = await res.json();
 	return json.data?.deleted ?? 0;
 }
@@ -296,6 +320,12 @@ function errorMessage(err: unknown): string {
 	return err instanceof Error ? err.message : String(err);
 }
 
+function describeError(action: string, err: unknown): string {
+	const msg = errorMessage(err);
+	// Avoid double-prefixing when the thrown Error already starts with "Failed to …"
+	return msg.startsWith("Failed to ") ? msg : `Failed to ${action}: ${msg}`;
+}
+
 function NotFoundPage() {
 	const [view, setView] = React.useState<ViewMode>("summary");
 	const [search, setSearch] = React.useState("");
@@ -324,7 +354,7 @@ function NotFoundPage() {
 			const items = await fetchSummary();
 			setSummary(items);
 		} catch (err) {
-			setError(errorMessage(err));
+			setError(describeError("load 404 summary", err));
 		} finally {
 			setLoading(false);
 		}
@@ -348,7 +378,7 @@ function NotFoundPage() {
 				}
 				setLogCursor(result.cursor);
 			} catch (err) {
-				setError(errorMessage(err));
+				setError(describeError("load 404 log", err));
 			} finally {
 				setLoading(false);
 				setLoadingMore(false);
@@ -357,23 +387,31 @@ function NotFoundPage() {
 		[],
 	);
 
-	// Load data on mount and view change (no search dep — search is explicit via form submit)
+	// Load data on mount and view change (no search dep — search is explicit via form submit).
+	// Also clears any lingering success notice from a prior view's action.
 	React.useEffect(() => {
+		setNotice(null);
 		if (view === "summary") loadSummary();
 		else loadLog();
 	}, [view, loadSummary, loadLog]);
 
 	const handleClearConfirm = async () => {
+		// Mutually exclude notice/error so the two banners never show together.
+		setError(null);
+		setNotice(null);
 		try {
 			const deleted = await clearAll();
 			setSummary([]);
 			setLogItems([]);
 			setLogCursor(null);
-			setNotice(`Cleared ${deleted} entries.`);
+			setNotice(`Cleared ${deleted} ${deleted === 1 ? "entry" : "entries"}.`);
 			setClearOpen(false);
 		} catch (err) {
-			setError(errorMessage(err));
+			setError(describeError("clear 404 log", err));
 			setClearOpen(false);
+			// Resync: a partial server-side delete would otherwise leave the UI showing stale rows.
+			if (view === "summary") loadSummary();
+			else loadLog({ search: search || undefined });
 		}
 	};
 
@@ -384,16 +422,21 @@ function NotFoundPage() {
 			return;
 		}
 		setPruneError(null);
+		setError(null);
+		setNotice(null);
 		const olderThan = new Date(Date.now() - d * 86400000).toISOString();
 		try {
 			const deleted = await pruneOlderThan(olderThan);
-			setNotice(`Pruned ${deleted} entries older than ${d} days.`);
+			setNotice(`Pruned ${deleted} ${deleted === 1 ? "entry" : "entries"} older than ${d} days.`);
 			setPruneOpen(false);
 			if (view === "summary") loadSummary();
 			else loadLog({ search: search || undefined });
 		} catch (err) {
-			setError(errorMessage(err));
-			setPruneOpen(false);
+			// Keep the dialog open and surface the error inline so the user keeps their day count
+			// and can retry. Also resync the main view in case the prune partially applied.
+			setPruneError(describeError("prune 404 log", err));
+			if (view === "summary") loadSummary();
+			else loadLog({ search: search || undefined });
 		}
 	};
 
