@@ -5,7 +5,7 @@
  * Fetches from the existing /_emdash/api/redirects/404s endpoints.
  */
 
-import { Badge, Button, Input, Loader } from "@cloudflare/kumo";
+import { Badge, Button, Dialog, Input, Loader } from "@cloudflare/kumo";
 import { Trash, MagnifyingGlass, FunnelSimple } from "@phosphor-icons/react";
 import type { PluginAdminExports } from "emdash";
 import { apiFetch, getErrorMessage, parseApiResponse } from "emdash/plugin-utils";
@@ -80,12 +80,35 @@ interface PostSuggestion {
 // =============================================================================
 
 const API_BASE = "/_emdash/api/redirects/404s";
+const REDIRECTS_BASE = "/_emdash/api/redirects";
+
+/**
+ * Build an Error from a non-OK response. Tries to extract a server-provided
+ * message from the JSON error envelope or plain text body, falling back to
+ * the HTTP status when neither is available.
+ */
+async function apiError(action: string, res: Response): Promise<Error> {
+	let detail = "";
+	try {
+		const text = await res.text();
+		if (text) {
+			try {
+				const parsed = JSON.parse(text);
+				detail = parsed?.error?.message ?? parsed?.message ?? text;
+			} catch {
+				detail = text;
+			}
+		}
+	} catch {
+		// ignore body read failures
+	}
+	const suffix = detail ? `: ${detail}` : "";
+	return new Error(`Failed to ${action} (${res.status})${suffix}`);
+}
 
 async function fetchSummary(limit = 100): Promise<NotFoundSummary[]> {
-	const res = await fetch(`${API_BASE}/summary?limit=${limit}`, {
-		credentials: "same-origin",
-	});
-	if (!res.ok) throw new Error(`Failed to fetch 404 summary: ${res.status}`);
+	const res = await apiFetch(`${API_BASE}/summary?limit=${limit}`);
+	if (!res.ok) throw await apiError("fetch 404 summary", res);
 	const json = await res.json();
 	return json.data?.items ?? [];
 }
@@ -99,17 +122,15 @@ async function fetchLog(opts: {
 	if (opts.limit) params.set("limit", String(opts.limit));
 	if (opts.cursor) params.set("cursor", opts.cursor);
 	if (opts.search) params.set("search", opts.search);
-	const res = await fetch(`${API_BASE}?${params}`, {
-		credentials: "same-origin",
-	});
-	if (!res.ok) throw new Error(`Failed to fetch 404 log: ${res.status}`);
+	const res = await apiFetch(`${API_BASE}?${params}`);
+	if (!res.ok) throw await apiError("fetch 404 log", res);
 	const json = await res.json();
 	return { items: json.data?.items ?? [], cursor: json.data?.cursor ?? null };
 }
 
 async function clearAll(): Promise<number> {
 	const res = await apiFetch(API_BASE, { method: "DELETE" });
-	if (!res.ok) throw new Error(`Failed to clear 404 log: ${res.status}`);
+	if (!res.ok) throw await apiError("clear 404 log", res);
 	const json = await res.json();
 	return json.data?.deleted ?? 0;
 }
@@ -120,12 +141,10 @@ async function pruneOlderThan(olderThan: string): Promise<number> {
 		headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({ olderThan }),
 	});
-	if (!res.ok) throw new Error(`Failed to prune 404 log: ${res.status}`);
+	if (!res.ok) throw await apiError("prune 404 log", res);
 	const json = await res.json();
 	return json.data?.deleted ?? 0;
 }
-
-const REDIRECTS_BASE = "/_emdash/api/redirects";
 
 async function createRedirect(input: CreateRedirectInput): Promise<Redirect> {
 	const res = await apiFetch(REDIRECTS_BASE, {
@@ -141,7 +160,7 @@ async function createRedirect(input: CreateRedirectInput): Promise<Redirect> {
 
 async function fetchCurrentUser(): Promise<CurrentUser | null> {
 	try {
-		const res = await fetch("/_emdash/api/auth/me", { credentials: "same-origin" });
+		const res = await apiFetch("/_emdash/api/auth/me");
 		if (!res.ok) return null;
 		const json = (await res.json()) as { data?: CurrentUser };
 		return json.data ?? null;
@@ -156,10 +175,7 @@ async function searchPostSuggestions(
 ): Promise<PostSuggestion[]> {
 	if (!q.trim()) return [];
 	const params = new URLSearchParams({ q, limit: "8" });
-	const res = await fetch(`/_emdash/api/search?${params}`, {
-		credentials: "same-origin",
-		signal,
-	});
+	const res = await apiFetch(`/_emdash/api/search?${params}`, { signal });
 	if (!res.ok) return [];
 	const json = (await res.json()) as {
 		data?: { items?: PostSuggestion[] };
@@ -417,6 +433,16 @@ function LogView({
 // Main Page
 // =============================================================================
 
+function errorMessage(err: unknown): string {
+	return err instanceof Error ? err.message : String(err);
+}
+
+function describeError(action: string, err: unknown): string {
+	const msg = errorMessage(err);
+	// Avoid double-prefixing when the thrown Error already starts with "Failed to …"
+	return msg.startsWith("Failed to ") ? msg : `Failed to ${action}: ${msg}`;
+}
+
 function DestinationAutosuggest({
 	value,
 	onChange,
@@ -571,8 +597,6 @@ function CreateRedirectModal({
 		}
 	}, [open, initialSource]);
 
-	if (!open) return null;
-
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
 		setError(null);
@@ -606,178 +630,160 @@ function CreateRedirectModal({
 				onClose();
 			}, 1200);
 		} catch (err) {
-			setError(err instanceof Error ? err.message : "Failed to create redirect.");
+			setError(errorMessage(err));
 		} finally {
 			setSubmitting(false);
 		}
 	};
 
 	return (
-		<div
-			role="dialog"
-			aria-modal="true"
-			style={{
-				position: "fixed",
-				inset: 0,
-				background: "rgba(0,0,0,0.4)",
-				display: "flex",
-				alignItems: "center",
-				justifyContent: "center",
-				zIndex: 1000,
-			}}
-			onClick={(e) => {
-				if (e.target === e.currentTarget && !submitting) onClose();
+		<Dialog.Root
+			open={open}
+			onOpenChange={(next) => {
+				if (!next && !submitting) onClose();
 			}}
 		>
-			<form
-				onSubmit={handleSubmit}
-				style={{
-					background: "var(--color-bg, #fff)",
-					borderRadius: 8,
-					padding: 24,
-					width: "min(520px, 92vw)",
-					maxHeight: "90vh",
-					overflowY: "auto",
-					boxShadow: "0 20px 50px rgba(0,0,0,0.25)",
-				}}
-			>
-				<h3 style={{ margin: "0 0 16px", fontSize: 18, fontWeight: 600 }}>
-					Create Redirect
-				</h3>
-
-				<div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-					<label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
-						<span style={{ fontWeight: 600 }}>Source</span>
-						<Input
-							value={source}
-							onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSource(e.target.value)}
-							disabled={submitting}
-							style={{ fontFamily: "var(--font-mono, monospace)" }}
-						/>
-						{isPattern && (
-							<span style={{ color: "var(--color-text-secondary, #9ca3af)", fontSize: 12 }}>
-								Use <code>[param]</code> for segments, <code>[...rest]</code> for catch-all.
-							</span>
-						)}
-					</label>
-
-					<label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
-						<span style={{ fontWeight: 600 }}>Destination</span>
-						{isPattern ? (
-							<>
-								<Input
-									value={destination}
-									onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-										setDestination(e.target.value)
-									}
-									disabled={submitting}
-									style={{ fontFamily: "var(--font-mono, monospace)" }}
-									placeholder="/new-path/[...rest]"
-								/>
+			<Dialog>
+				<Dialog.Title>Create Redirect</Dialog.Title>
+				<form onSubmit={handleSubmit}>
+					<div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>
+						<label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
+							<span style={{ fontWeight: 600 }}>Source</span>
+							<Input
+								value={source}
+								onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSource(e.target.value)}
+								disabled={submitting}
+								style={{ fontFamily: "var(--font-mono, monospace)" }}
+							/>
+							{isPattern && (
 								<span style={{ color: "var(--color-text-secondary, #9ca3af)", fontSize: 12 }}>
-									Reference the same <code>[param]</code> / <code>[...rest]</code> names from the source.
+									Use <code>[param]</code> for segments, <code>[...rest]</code> for catch-all.
 								</span>
-							</>
-						) : (
-							<DestinationAutosuggest
-								value={destination}
-								onChange={setDestination}
+							)}
+						</label>
+
+						<label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
+							<span style={{ fontWeight: 600 }}>Destination</span>
+							{isPattern ? (
+								<>
+									<Input
+										value={destination}
+										onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+											setDestination(e.target.value)
+										}
+										disabled={submitting}
+										style={{ fontFamily: "var(--font-mono, monospace)" }}
+										placeholder="/new-path/[...rest]"
+									/>
+									<span style={{ color: "var(--color-text-secondary, #9ca3af)", fontSize: 12 }}>
+										Reference the same <code>[param]</code> / <code>[...rest]</code> names from the source.
+									</span>
+								</>
+							) : (
+								<DestinationAutosuggest
+									value={destination}
+									onChange={setDestination}
+									disabled={submitting}
+								/>
+							)}
+						</label>
+
+						<label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
+							<span style={{ fontWeight: 600 }}>Type</span>
+							<select
+								value={type}
+								onChange={(e) => setType(parseInt(e.target.value, 10))}
+								disabled={submitting}
+								style={{
+									padding: "6px 8px",
+									borderRadius: 6,
+									border: "1px solid var(--color-border, #e5e7eb)",
+									fontSize: 13,
+								}}
+							>
+								{REDIRECT_TYPES.map((t) => (
+									<option key={t.value} value={t.value}>
+										{t.label}
+									</option>
+								))}
+							</select>
+						</label>
+
+						<label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+							<input
+								type="checkbox"
+								checked={enabled}
+								onChange={(e) => setEnabled(e.target.checked)}
 								disabled={submitting}
 							/>
-						)}
-					</label>
+							<span>Enabled</span>
+						</label>
 
-					<label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
-						<span style={{ fontWeight: 600 }}>Type</span>
-						<select
-							value={type}
-							onChange={(e) => setType(parseInt(e.target.value, 10))}
-							disabled={submitting}
+						<label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+							<input
+								type="checkbox"
+								checked={isPattern}
+								onChange={(e) => setIsPattern(e.target.checked)}
+								disabled={submitting}
+							/>
+							<span>Use as pattern (Astro route syntax)</span>
+						</label>
+
+						<label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+							<input
+								type="checkbox"
+								checked={clearMatching}
+								onChange={(e) => setClearMatching(e.target.checked)}
+								disabled={submitting}
+							/>
+							<span>Clear matching 404 log entries after creating (pending core support)</span>
+						</label>
+					</div>
+
+					{error && (
+						<div
 							style={{
-								padding: "6px 8px",
+								marginTop: 12,
+								padding: 10,
+								background: "#fef2f2",
+								color: "#dc2626",
 								borderRadius: 6,
-								border: "1px solid var(--color-border, #e5e7eb)",
 								fontSize: 13,
 							}}
 						>
-							{REDIRECT_TYPES.map((t) => (
-								<option key={t.value} value={t.value}>
-									{t.label}
-								</option>
-							))}
-						</select>
-					</label>
+							{error}
+						</div>
+					)}
+					{successNote && (
+						<div
+							style={{
+								marginTop: 12,
+								padding: 10,
+								background: "#f0fdf4",
+								color: "#15803d",
+								borderRadius: 6,
+								fontSize: 13,
+							}}
+						>
+							{successNote}
+						</div>
+					)}
 
-					<label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-						<input
-							type="checkbox"
-							checked={enabled}
-							onChange={(e) => setEnabled(e.target.checked)}
-							disabled={submitting}
+					<div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20 }}>
+						<Dialog.Close
+							render={(p: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
+								<Button variant="secondary" type="button" disabled={submitting} {...p}>
+									Cancel
+								</Button>
+							)}
 						/>
-						<span>Enabled</span>
-					</label>
-
-					<label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-						<input
-							type="checkbox"
-							checked={isPattern}
-							onChange={(e) => setIsPattern(e.target.checked)}
-							disabled={submitting}
-						/>
-						<span>Use as pattern (Astro route syntax)</span>
-					</label>
-
-					<label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-						<input
-							type="checkbox"
-							checked={clearMatching}
-							onChange={(e) => setClearMatching(e.target.checked)}
-							disabled={submitting}
-						/>
-						<span>Clear matching 404 log entries after creating (pending core support)</span>
-					</label>
-				</div>
-
-				{error && (
-					<div
-						style={{
-							marginTop: 12,
-							padding: 10,
-							background: "#fef2f2",
-							color: "#dc2626",
-							borderRadius: 6,
-							fontSize: 13,
-						}}
-					>
-						{error}
+						<Button type="submit" disabled={submitting}>
+							{submitting ? <Loader /> : "Create Redirect"}
+						</Button>
 					</div>
-				)}
-				{successNote && (
-					<div
-						style={{
-							marginTop: 12,
-							padding: 10,
-							background: "#f0fdf4",
-							color: "#15803d",
-							borderRadius: 6,
-							fontSize: 13,
-						}}
-					>
-						{successNote}
-					</div>
-				)}
-
-				<div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20 }}>
-					<Button variant="outline" type="button" onClick={onClose} disabled={submitting}>
-						Cancel
-					</Button>
-					<Button type="submit" disabled={submitting}>
-						{submitting ? <Loader /> : "Create Redirect"}
-					</Button>
-				</div>
-			</form>
-		</div>
+				</form>
+			</Dialog>
+		</Dialog.Root>
 	);
 }
 
@@ -794,6 +800,7 @@ function NotFoundPage() {
 	const [search, setSearch] = React.useState("");
 	const [loading, setLoading] = React.useState(true);
 	const [error, setError] = React.useState<string | null>(null);
+	const [notice, setNotice] = React.useState<string | null>(null);
 
 	// Summary state
 	const [summary, setSummary] = React.useState<NotFoundSummary[]>([]);
@@ -803,6 +810,15 @@ function NotFoundPage() {
 	const [logCursor, setLogCursor] = React.useState<string | null>(null);
 	const [loadingMore, setLoadingMore] = React.useState(false);
 
+	// Dialog state
+	const [clearOpen, setClearOpen] = React.useState(false);
+	const [clearInFlight, setClearInFlight] = React.useState(false);
+	const [pruneOpen, setPruneOpen] = React.useState(false);
+	const [pruneInFlight, setPruneInFlight] = React.useState(false);
+	const [pruneDays, setPruneDays] = React.useState("30");
+	const [pruneError, setPruneError] = React.useState<string | null>(null);
+
+	// Create-redirect state
 	const [canManageRedirects, setCanManageRedirects] = React.useState(false);
 	const [modalOpen, setModalOpen] = React.useState(false);
 	const [modalSource, setModalSource] = React.useState("");
@@ -813,42 +829,44 @@ function NotFoundPage() {
 		try {
 			const items = await fetchSummary();
 			setSummary(items);
-		} catch (e: any) {
-			setError(e.message);
+		} catch (err) {
+			setError(describeError("load 404 summary", err));
 		} finally {
 			setLoading(false);
 		}
 	}, []);
 
 	const loadLog = React.useCallback(
-		async (append = false, cursor?: string) => {
-			if (append) setLoadingMore(true);
+		async (opts: { append?: boolean; cursor?: string; search?: string } = {}) => {
+			if (opts.append) setLoadingMore(true);
 			else setLoading(true);
 			setError(null);
 			try {
 				const result = await fetchLog({
 					limit: 50,
-					cursor,
-					search: search || undefined,
+					cursor: opts.cursor,
+					search: opts.search || undefined,
 				});
-				if (append) {
+				if (opts.append) {
 					setLogItems((prev) => [...prev, ...result.items]);
 				} else {
 					setLogItems(result.items);
 				}
 				setLogCursor(result.cursor);
-			} catch (e: any) {
-				setError(e.message);
+			} catch (err) {
+				setError(describeError("load 404 log", err));
 			} finally {
 				setLoading(false);
 				setLoadingMore(false);
 			}
 		},
-		[search],
+		[],
 	);
 
-	// Load data on mount and view change
+	// Load data on mount and view change (no search dep — search is explicit via form submit).
+	// Also clears any lingering success notice from a prior view's action.
 	React.useEffect(() => {
+		setNotice(null);
 		if (view === "summary") loadSummary();
 		else loadLog();
 	}, [view, loadSummary, loadLog]);
@@ -875,41 +893,66 @@ function NotFoundPage() {
 
 	const handleRedirectCreated = React.useCallback(() => {
 		if (view === "summary") loadSummary();
-		else loadLog();
-	}, [view, loadSummary, loadLog]);
+		else loadLog({ search: search || undefined });
+	}, [view, loadSummary, loadLog, search]);
 
-	const handleClear = async () => {
-		if (!confirm("Clear all 404 log entries? This cannot be undone.")) return;
+	const handleClearConfirm = async () => {
+		if (clearInFlight) return;
+		// Mutually exclude notice/error so the two banners never show together.
+		setError(null);
+		setNotice(null);
+		setClearInFlight(true);
 		try {
 			const deleted = await clearAll();
 			setSummary([]);
 			setLogItems([]);
 			setLogCursor(null);
-			alert(`Cleared ${deleted} entries.`);
-		} catch (e: any) {
-			alert(`Error: ${e.message}`);
+			setNotice(`Cleared ${deleted} ${deleted === 1 ? "entry" : "entries"}.`);
+			setClearOpen(false);
+		} catch (err) {
+			setError(describeError("clear 404 log", err));
+			setClearOpen(false);
+			// Resync: a partial server-side delete would otherwise leave the UI showing stale rows.
+			if (view === "summary") loadSummary();
+			else loadLog({ search: search || undefined });
+		} finally {
+			setClearInFlight(false);
 		}
 	};
 
-	const handlePrune = async () => {
-		const days = prompt("Delete entries older than how many days?", "30");
-		if (!days) return;
-		const d = parseInt(days, 10);
-		if (isNaN(d) || d < 1) return alert("Enter a valid number of days.");
+	const handlePruneConfirm = async () => {
+		if (pruneInFlight) return;
+		const trimmed = pruneDays.trim();
+		const d = Number(trimmed);
+		if (trimmed.length === 0 || !Number.isFinite(d) || !Number.isInteger(d) || d < 1) {
+			setPruneError("Enter a valid number of days.");
+			return;
+		}
+		setPruneError(null);
+		setError(null);
+		setNotice(null);
+		setPruneInFlight(true);
 		const olderThan = new Date(Date.now() - d * 86400000).toISOString();
 		try {
 			const deleted = await pruneOlderThan(olderThan);
-			alert(`Pruned ${deleted} entries older than ${d} days.`);
+			setNotice(`Pruned ${deleted} ${deleted === 1 ? "entry" : "entries"} older than ${d} days.`);
+			setPruneOpen(false);
 			if (view === "summary") loadSummary();
-			else loadLog();
-		} catch (e: any) {
-			alert(`Error: ${e.message}`);
+			else loadLog({ search: search || undefined });
+		} catch (err) {
+			// Keep the dialog open and surface the error inline so the user keeps their day count
+			// and can retry. Also resync the main view in case the prune partially applied.
+			setPruneError(describeError("prune 404 log", err));
+			if (view === "summary") loadSummary();
+			else loadLog({ search: search || undefined });
+		} finally {
+			setPruneInFlight(false);
 		}
 	};
 
 	const handleSearch = (e: React.FormEvent) => {
 		e.preventDefault();
-		loadLog();
+		loadLog({ search: search || undefined });
 	};
 
 	return (
@@ -917,10 +960,10 @@ function NotFoundPage() {
 			<div style={styles.header}>
 				<h2 style={styles.title}>404 Log</h2>
 				<div style={styles.controls}>
-					<Button variant="outline" onClick={handlePrune}>
+					<Button variant="outline" onClick={() => { setPruneError(null); setPruneOpen(true); }}>
 						<FunnelSimple size={14} /> Prune
 					</Button>
-					<Button variant="outline" onClick={handleClear}>
+					<Button variant="outline" onClick={() => setClearOpen(true)}>
 						<Trash size={14} /> Clear All
 					</Button>
 				</div>
@@ -955,6 +998,19 @@ function NotFoundPage() {
 				</div>
 			)}
 
+			{notice && (
+				<div style={{ padding: 12, background: "#f0fdf4", borderRadius: 6, color: "#15803d", marginBottom: 12, fontSize: 13, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+					<span>{notice}</span>
+					<button
+						onClick={() => setNotice(null)}
+						style={{ background: "transparent", border: "none", cursor: "pointer", color: "inherit", fontSize: 16, lineHeight: 1 }}
+						aria-label="Dismiss"
+					>
+						×
+					</button>
+				</div>
+			)}
+
 			{loading ? (
 				<div style={{ display: "flex", justifyContent: "center", padding: 40 }}>
 					<Loader />
@@ -971,11 +1027,67 @@ function NotFoundPage() {
 					items={logItems}
 					cursor={logCursor}
 					loading={loadingMore}
-					onLoadMore={() => loadLog(true, logCursor ?? undefined)}
+					onLoadMore={() =>
+						loadLog({ append: true, cursor: logCursor ?? undefined, search: search || undefined })
+					}
 					canCreateRedirect={canManageRedirects}
 					onCreateRedirect={openCreateRedirect}
 				/>
 			)}
+
+			{/* Clear All confirmation */}
+			<Dialog.Root role="alertdialog" open={clearOpen} onOpenChange={(open) => { if (!clearInFlight) setClearOpen(open); }}>
+				<Dialog>
+					<Dialog.Title>Clear all 404 log entries?</Dialog.Title>
+					<Dialog.Description>
+						This will permanently delete every entry in the 404 log. This action cannot be undone.
+					</Dialog.Description>
+					<div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+						<Dialog.Close render={(p: React.ButtonHTMLAttributes<HTMLButtonElement>) => <Button variant="secondary" disabled={clearInFlight} {...p}>Cancel</Button>} />
+						<Button variant="destructive" onClick={handleClearConfirm} disabled={clearInFlight}>
+							{clearInFlight ? <Loader /> : "Clear all"}
+						</Button>
+					</div>
+				</Dialog>
+			</Dialog.Root>
+
+			{/* Prune dialog */}
+			<Dialog.Root role="alertdialog" open={pruneOpen} onOpenChange={(open) => { if (!pruneInFlight) setPruneOpen(open); }}>
+				<Dialog>
+					<Dialog.Title>Prune old entries</Dialog.Title>
+					<Dialog.Description>
+						Delete 404 log entries older than the number of days below.
+					</Dialog.Description>
+					<form
+						onSubmit={(e) => {
+							e.preventDefault();
+							handlePruneConfirm();
+						}}
+						style={{ marginTop: 12 }}
+					>
+						<label style={{ display: "block", fontSize: 13, marginBottom: 6 }}>
+							Older than (days)
+						</label>
+						<Input
+							type="number"
+							min={1}
+							value={pruneDays}
+							onChange={(e: React.ChangeEvent<HTMLInputElement>) => setPruneDays(e.target.value)}
+							disabled={pruneInFlight}
+							autoFocus
+						/>
+						{pruneError && (
+							<div style={{ color: "#dc2626", fontSize: 12, marginTop: 6 }}>{pruneError}</div>
+						)}
+						<div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+							<Dialog.Close render={(p: React.ButtonHTMLAttributes<HTMLButtonElement>) => <Button variant="secondary" type="button" disabled={pruneInFlight} {...p}>Cancel</Button>} />
+							<Button variant="destructive" type="submit" disabled={pruneInFlight}>
+								{pruneInFlight ? <Loader /> : "Prune"}
+							</Button>
+						</div>
+					</form>
+				</Dialog>
+			</Dialog.Root>
 
 			<CreateRedirectModal
 				open={modalOpen}
