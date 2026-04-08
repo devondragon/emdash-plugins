@@ -219,7 +219,7 @@ function SummaryView({ items, onRefresh }: { items: NotFoundSummary[]; onRefresh
 					<tr key={item.path}>
 						<td style={{ ...styles.td, ...styles.pathCell }}>{item.path}</td>
 						<td style={{ ...styles.td, textAlign: "right" }}>
-							<Badge variant={item.count >= 10 ? "danger" : item.count >= 3 ? "warning" : "default"}>
+							<Badge variant={item.count >= 10 ? "red" : item.count >= 3 ? "orange" : "outline"}>
 								{item.count}
 							</Badge>
 						</td>
