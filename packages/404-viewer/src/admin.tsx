@@ -8,7 +8,7 @@
 import { Badge, Button, Dialog, Input, Loader } from "@cloudflare/kumo";
 import { Trash, MagnifyingGlass, FunnelSimple } from "@phosphor-icons/react";
 import type { PluginAdminExports } from "emdash";
-import { apiFetch } from "emdash/plugin-utils";
+import { apiFetch, getErrorMessage, parseApiResponse } from "emdash/plugin-utils";
 import * as React from "react";
 
 // =============================================================================
@@ -33,11 +33,54 @@ interface NotFoundSummary {
 
 type ViewMode = "summary" | "log";
 
+// Mirrors core's Redirect row (packages/core/src/database/repositories/redirect.ts)
+interface Redirect {
+	id: string;
+	source: string;
+	destination: string;
+	type: number;
+	isPattern: boolean;
+	enabled: boolean;
+	hits: number;
+	lastHitAt: string | null;
+	groupName: string | null;
+	auto: boolean;
+	createdAt: string;
+	updatedAt: string;
+}
+
+interface CreateRedirectInput {
+	source: string;
+	destination: string;
+	type: number;
+	enabled: boolean;
+	groupName?: string | null;
+}
+
+// Subset of GET /_emdash/api/auth/me we actually use.
+// NOTE: role shape is assumed based on plan guidance — core's RoleLevel is
+// numeric with admin == 80. If core changes this, update isAdminRole below.
+interface CurrentUser {
+	id: string;
+	email: string;
+	name: string | null;
+	role: string | number;
+}
+
+// Subset of GET /_emdash/api/search SearchResult we actually use
+interface PostSuggestion {
+	id: string;
+	collection: string;
+	slug: string | null;
+	title: string | null;
+}
+
 // =============================================================================
 // API Helpers
 // =============================================================================
 
 const API_BASE = "/_emdash/api/redirects/404s";
+const REDIRECTS_BASE = "/_emdash/api/redirects";
 
 /**
  * Build an Error from a non-OK response. Tries to extract a server-provided
@@ -101,6 +144,43 @@ async function pruneOlderThan(olderThan: string): Promise<number> {
 	if (!res.ok) throw await apiError("prune 404 log", res);
 	const json = await res.json();
 	return json.data?.deleted ?? 0;
+}
+
+async function createRedirect(input: CreateRedirectInput): Promise<Redirect> {
+	const res = await apiFetch(REDIRECTS_BASE, {
+		method: "POST",
+		headers: { "Content-Type": "application/json" },
+		body: JSON.stringify(input),
+	});
+	if (!res.ok) {
+		throw new Error(await getErrorMessage(res, "Failed to create redirect"));
+	}
+	return parseApiResponse<Redirect>(res, "Failed to create redirect");
+}
+
+async function fetchCurrentUser(): Promise<CurrentUser | null> {
+	try {
+		const res = await apiFetch("/_emdash/api/auth/me");
+		if (!res.ok) return null;
+		const json = (await res.json()) as { data?: CurrentUser };
+		return json.data ?? null;
+	} catch {
+		return null;
+	}
+}
+
+async function searchPostSuggestions(
+	q: string,
+	signal?: AbortSignal,
+): Promise<PostSuggestion[]> {
+	if (!q.trim()) return [];
+	const params = new URLSearchParams({ q, limit: "8" });
+	const res = await apiFetch(`/_emdash/api/search?${params}`, { signal });
+	if (!res.ok) return [];
+	const json = (await res.json()) as {
+		data?: { items?: PostSuggestion[] };
+	};
+	return json.data?.items ?? [];
 }
 
 // =============================================================================
@@ -214,7 +294,18 @@ const styles = {
 // Summary View
 // =============================================================================
 
-function SummaryView({ items, onRefresh }: { items: NotFoundSummary[]; onRefresh: () => void }) {
+function SummaryView({
+	items,
+	onRefresh,
+	canCreateRedirect,
+	onCreateRedirect,
+}: {
+	items: NotFoundSummary[];
+	onRefresh: () => void;
+	canCreateRedirect: boolean;
+	onCreateRedirect: (path: string) => void;
+}) {
+	void onRefresh;
 	if (items.length === 0) {
 		return (
 			<div style={styles.empty}>
@@ -232,6 +323,7 @@ function SummaryView({ items, onRefresh }: { items: NotFoundSummary[]; onRefresh
 					<th style={{ ...styles.th, textAlign: "right" }}>Hits</th>
 					<th style={styles.th}>Last Seen</th>
 					<th style={styles.th}>Top Referrer</th>
+					{canCreateRedirect && <th style={styles.th} aria-label="Actions" />}
 				</tr>
 			</thead>
 			<tbody>
@@ -247,6 +339,16 @@ function SummaryView({ items, onRefresh }: { items: NotFoundSummary[]; onRefresh
 						<td style={{ ...styles.td, ...styles.muted }}>
 							{item.topReferrer ? truncate(item.topReferrer, 50) : "—"}
 						</td>
+						{canCreateRedirect && (
+							<td style={{ ...styles.td, textAlign: "right", whiteSpace: "nowrap" }}>
+								<Button
+									variant="outline"
+									onClick={() => onCreateRedirect(item.path)}
+								>
+									→ Redirect
+								</Button>
+							</td>
+						)}
 					</tr>
 				))}
 			</tbody>
@@ -263,11 +365,15 @@ function LogView({
 	cursor,
 	loading,
 	onLoadMore,
+	canCreateRedirect,
+	onCreateRedirect,
 }: {
 	items: NotFoundEntry[];
 	cursor: string | null;
 	loading: boolean;
 	onLoadMore: () => void;
+	canCreateRedirect: boolean;
+	onCreateRedirect: (path: string) => void;
 }) {
 	if (items.length === 0 && !loading) {
 		return (
@@ -285,6 +391,7 @@ function LogView({
 						<th style={styles.th}>Path</th>
 						<th style={styles.th}>Referrer</th>
 						<th style={styles.th}>Time</th>
+						{canCreateRedirect && <th style={styles.th} aria-label="Actions" />}
 					</tr>
 				</thead>
 				<tbody>
@@ -297,6 +404,16 @@ function LogView({
 							<td style={{ ...styles.td, ...styles.muted, whiteSpace: "nowrap" }}>
 								{timeAgo(entry.createdAt)}
 							</td>
+							{canCreateRedirect && (
+								<td style={{ ...styles.td, textAlign: "right", whiteSpace: "nowrap" }}>
+									<Button
+										variant="outline"
+										onClick={() => onCreateRedirect(entry.path)}
+									>
+										→ Redirect
+									</Button>
+								</td>
+							)}
 						</tr>
 					))}
 				</tbody>
@@ -326,6 +443,371 @@ function describeError(action: string, err: unknown): string {
 	return msg.startsWith("Failed to ") ? msg : `Failed to ${action}: ${msg}`;
 }
 
+function DestinationAutosuggest({
+	value,
+	onChange,
+	disabled,
+}: {
+	value: string;
+	onChange: (v: string) => void;
+	disabled?: boolean;
+}) {
+	const [query, setQuery] = React.useState("");
+	const [items, setItems] = React.useState<PostSuggestion[]>([]);
+	const [open, setOpen] = React.useState(false);
+	const blurTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+	React.useEffect(() => {
+		return () => {
+			if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+		};
+	}, []);
+
+	React.useEffect(() => {
+		if (!query.trim()) {
+			setItems([]);
+			return;
+		}
+		const controller = new AbortController();
+		const timer = setTimeout(() => {
+			searchPostSuggestions(query, controller.signal)
+				.then(setItems)
+				.catch(() => {
+					// Swallow: suggestions are a convenience, not critical.
+				});
+		}, 250);
+		return () => {
+			clearTimeout(timer);
+			controller.abort();
+		};
+	}, [query]);
+
+	const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+		const v = e.target.value;
+		onChange(v);
+		setQuery(v.startsWith("/") ? v.slice(1) : v);
+		setOpen(true);
+	};
+
+	const handlePick = (item: PostSuggestion) => {
+		const slug = item.slug ?? "";
+		onChange(`/${slug}`);
+		setOpen(false);
+	};
+
+	return (
+		<div style={{ position: "relative" }}>
+			<Input
+				placeholder="/destination-path"
+				value={value}
+				onChange={handleChange}
+				onFocus={() => setOpen(true)}
+				onBlur={() => {
+					if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+					blurTimerRef.current = setTimeout(() => setOpen(false), 150);
+				}}
+				disabled={disabled}
+				style={{ width: "100%" }}
+			/>
+			{open && items.length > 0 && (
+				<div
+					style={{
+						position: "absolute",
+						top: "100%",
+						left: 0,
+						right: 0,
+						background: "var(--color-bg, #fff)",
+						border: "1px solid var(--color-border, #e5e7eb)",
+						borderRadius: 6,
+						marginTop: 4,
+						maxHeight: 240,
+						overflowY: "auto",
+						zIndex: 10,
+						boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+					}}
+				>
+					{items.map((item) => (
+						<button
+							key={`${item.collection}:${item.id}`}
+							type="button"
+							onMouseDown={(e) => {
+								e.preventDefault();
+							}}
+							onClick={() => handlePick(item)}
+							style={{
+								display: "block",
+								width: "100%",
+								textAlign: "left",
+								padding: "8px 12px",
+								border: "none",
+								background: "transparent",
+								cursor: "pointer",
+								fontSize: 13,
+								borderBottom: "1px solid var(--color-border, #f3f4f6)",
+							}}
+						>
+							<div style={{ fontWeight: 600 }}>{item.title ?? "(untitled)"}</div>
+							<div style={{ color: "var(--color-text-secondary, #9ca3af)", fontSize: 12, fontFamily: "var(--font-mono, monospace)" }}>
+								/{item.collection}/{item.slug ?? item.id}
+							</div>
+						</button>
+					))}
+				</div>
+			)}
+		</div>
+	);
+}
+
+const REDIRECT_TYPES = [
+	{ value: 301, label: "301 Permanent" },
+	{ value: 302, label: "302 Found" },
+	{ value: 307, label: "307 Temporary" },
+	{ value: 308, label: "308 Permanent" },
+];
+
+function CreateRedirectModal({
+	open,
+	initialSource,
+	onClose,
+	onSuccess,
+}: {
+	open: boolean;
+	initialSource: string;
+	onClose: () => void;
+	onSuccess: () => void;
+}) {
+	const [source, setSource] = React.useState(initialSource);
+	const [destination, setDestination] = React.useState("");
+	const [type, setType] = React.useState(301);
+	const [enabled, setEnabled] = React.useState(true);
+	const [isPattern, setIsPattern] = React.useState(false);
+	const [clearMatching, setClearMatching] = React.useState(true);
+	const [submitting, setSubmitting] = React.useState(false);
+	const [error, setError] = React.useState<string | null>(null);
+	const [successNote, setSuccessNote] = React.useState<string | null>(null);
+	const closeTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+	React.useEffect(() => {
+		return () => {
+			if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+		};
+	}, []);
+
+	React.useEffect(() => {
+		if (open) {
+			setSource(initialSource);
+			setDestination("");
+			setType(301);
+			setEnabled(true);
+			setIsPattern(false);
+			setClearMatching(true);
+			setError(null);
+			setSuccessNote(null);
+			setSubmitting(false);
+		} else {
+			// Cancel any pending auto-close when the dialog is dismissed manually.
+			if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+		}
+	}, [open, initialSource]);
+
+	const handleSubmit = async (e: React.FormEvent) => {
+		e.preventDefault();
+		setError(null);
+		setSuccessNote(null);
+
+		if (!source.startsWith("/") || source.startsWith("//")) {
+			setError("Source must start with / and cannot be protocol-relative.");
+			return;
+		}
+		if (!destination.startsWith("/") || destination.startsWith("//")) {
+			setError("Destination must start with / and cannot be protocol-relative.");
+			return;
+		}
+		if (source === destination) {
+			setError("Source and destination must be different.");
+			return;
+		}
+
+		setSubmitting(true);
+		try {
+			await createRedirect({ source, destination, type, enabled });
+			if (clearMatching) {
+				setSuccessNote(
+					"Redirect created. Existing 404 log entries for this path are not deleted (per-path cleanup is pending a core API change); new requests should now resolve via the redirect.",
+				);
+			} else {
+				setSuccessNote("Redirect created.");
+			}
+			closeTimerRef.current = setTimeout(() => {
+				onSuccess();
+				onClose();
+			}, 1200);
+		} catch (err) {
+			setError(errorMessage(err));
+		} finally {
+			setSubmitting(false);
+		}
+	};
+
+	return (
+		<Dialog.Root
+			open={open}
+			onOpenChange={(next) => {
+				if (!next && !submitting) onClose();
+			}}
+		>
+			<Dialog>
+				<Dialog.Title>Create Redirect</Dialog.Title>
+				<form onSubmit={handleSubmit}>
+					<div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>
+						<label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
+							<span style={{ fontWeight: 600 }}>Source</span>
+							<Input
+								value={source}
+								onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSource(e.target.value)}
+								disabled={submitting}
+								style={{ fontFamily: "var(--font-mono, monospace)" }}
+							/>
+							{isPattern && (
+								<span style={{ color: "var(--color-text-secondary, #9ca3af)", fontSize: 12 }}>
+									Use <code>[param]</code> for segments, <code>[...rest]</code> for catch-all.
+								</span>
+							)}
+						</label>
+
+						<label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
+							<span style={{ fontWeight: 600 }}>Destination</span>
+							{isPattern ? (
+								<>
+									<Input
+										value={destination}
+										onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+											setDestination(e.target.value)
+										}
+										disabled={submitting}
+										style={{ fontFamily: "var(--font-mono, monospace)" }}
+										placeholder="/new-path/[...rest]"
+									/>
+									<span style={{ color: "var(--color-text-secondary, #9ca3af)", fontSize: 12 }}>
+										Reference the same <code>[param]</code> / <code>[...rest]</code> names from the source.
+									</span>
+								</>
+							) : (
+								<DestinationAutosuggest
+									value={destination}
+									onChange={setDestination}
+									disabled={submitting}
+								/>
+							)}
+						</label>
+
+						<label style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 13 }}>
+							<span style={{ fontWeight: 600 }}>Type</span>
+							<select
+								value={type}
+								onChange={(e) => setType(parseInt(e.target.value, 10))}
+								disabled={submitting}
+								style={{
+									padding: "6px 8px",
+									borderRadius: 6,
+									border: "1px solid var(--color-border, #e5e7eb)",
+									fontSize: 13,
+								}}
+							>
+								{REDIRECT_TYPES.map((t) => (
+									<option key={t.value} value={t.value}>
+										{t.label}
+									</option>
+								))}
+							</select>
+						</label>
+
+						<label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+							<input
+								type="checkbox"
+								checked={enabled}
+								onChange={(e) => setEnabled(e.target.checked)}
+								disabled={submitting}
+							/>
+							<span>Enabled</span>
+						</label>
+
+						<label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+							<input
+								type="checkbox"
+								checked={isPattern}
+								onChange={(e) => setIsPattern(e.target.checked)}
+								disabled={submitting}
+							/>
+							<span>Use as pattern (Astro route syntax)</span>
+						</label>
+
+						<label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+							<input
+								type="checkbox"
+								checked={clearMatching}
+								onChange={(e) => setClearMatching(e.target.checked)}
+								disabled={submitting}
+							/>
+							<span>Clear matching 404 log entries after creating (pending core support)</span>
+						</label>
+					</div>
+
+					{error && (
+						<div
+							style={{
+								marginTop: 12,
+								padding: 10,
+								background: "#fef2f2",
+								color: "#dc2626",
+								borderRadius: 6,
+								fontSize: 13,
+							}}
+						>
+							{error}
+						</div>
+					)}
+					{successNote && (
+						<div
+							style={{
+								marginTop: 12,
+								padding: 10,
+								background: "#f0fdf4",
+								color: "#15803d",
+								borderRadius: 6,
+								fontSize: 13,
+							}}
+						>
+							{successNote}
+						</div>
+					)}
+
+					<div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 20 }}>
+						<Dialog.Close
+							render={(p: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
+								<Button variant="secondary" type="button" disabled={submitting} {...p}>
+									Cancel
+								</Button>
+							)}
+						/>
+						<Button type="submit" disabled={submitting}>
+							{submitting ? <Loader /> : "Create Redirect"}
+						</Button>
+					</div>
+				</form>
+			</Dialog>
+		</Dialog.Root>
+	);
+}
+
+function isAdminRole(role: string | number | null | undefined): boolean {
+	if (role == null) return false;
+	if (typeof role === "string") return role.toLowerCase() === "admin";
+	// ASSUMPTION: core's RoleLevel uses numeric levels; admin is the highest
+	// common level (80). If core changes this threshold, update here.
+	return role >= 80;
+}
+
 function NotFoundPage() {
 	const [view, setView] = React.useState<ViewMode>("summary");
 	const [search, setSearch] = React.useState("");
@@ -348,6 +830,11 @@ function NotFoundPage() {
 	const [pruneInFlight, setPruneInFlight] = React.useState(false);
 	const [pruneDays, setPruneDays] = React.useState("30");
 	const [pruneError, setPruneError] = React.useState<string | null>(null);
+
+	// Create-redirect state
+	const [canManageRedirects, setCanManageRedirects] = React.useState(false);
+	const [modalOpen, setModalOpen] = React.useState(false);
+	const [modalSource, setModalSource] = React.useState("");
 
 	const loadSummary = React.useCallback(async () => {
 		setLoading(true);
@@ -396,6 +883,31 @@ function NotFoundPage() {
 		if (view === "summary") loadSummary();
 		else loadLog();
 	}, [view, loadSummary, loadLog]);
+
+	React.useEffect(() => {
+		let cancelled = false;
+		fetchCurrentUser().then((user) => {
+			if (cancelled) return;
+			setCanManageRedirects(isAdminRole(user?.role));
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+
+	const openCreateRedirect = React.useCallback((path: string) => {
+		setModalSource(path);
+		setModalOpen(true);
+	}, []);
+
+	const closeCreateRedirect = React.useCallback(() => {
+		setModalOpen(false);
+	}, []);
+
+	const handleRedirectCreated = React.useCallback(() => {
+		if (view === "summary") loadSummary();
+		else loadLog({ search: search || undefined });
+	}, [view, loadSummary, loadLog, search]);
 
 	const handleClearConfirm = async () => {
 		if (clearInFlight) return;
@@ -517,7 +1029,12 @@ function NotFoundPage() {
 					<Loader />
 				</div>
 			) : view === "summary" ? (
-				<SummaryView items={summary} onRefresh={loadSummary} />
+				<SummaryView
+					items={summary}
+					onRefresh={loadSummary}
+					canCreateRedirect={canManageRedirects}
+					onCreateRedirect={openCreateRedirect}
+				/>
 			) : (
 				<LogView
 					items={logItems}
@@ -526,6 +1043,8 @@ function NotFoundPage() {
 					onLoadMore={() =>
 						loadLog({ append: true, cursor: logCursor ?? undefined, search: search || undefined })
 					}
+					canCreateRedirect={canManageRedirects}
+					onCreateRedirect={openCreateRedirect}
 				/>
 			)}
 
@@ -582,6 +1101,13 @@ function NotFoundPage() {
 					</form>
 				</Dialog>
 			</Dialog.Root>
+
+			<CreateRedirectModal
+				open={modalOpen}
+				initialSource={modalSource}
+				onClose={closeCreateRedirect}
+				onSuccess={handleRedirectCreated}
+			/>
 		</div>
 	);
 }
