@@ -77,6 +77,45 @@ This plugin declares:
 
 Image imports are sent through the authenticated EmDash admin media API (`/_emdash/api/media`); the plugin does not declare or use a separate `write:media` capability. No access to site content, users, or email.
 
+## Known issue: CSP blocks Unsplash thumbnails
+
+EmDash's admin Content-Security-Policy hardcodes `img-src` to `'self' data: blob:` (plus the marketplace origin) and does **not** extend it based on plugin `allowedHosts` — see [emdash-cms/emdash#415](https://github.com/emdash-cms/emdash/issues/415). Until that is fixed upstream, the Unsplash search tab will render empty tiles in the admin UI (titles and attribution show, but the image areas are blank) because `https://images.unsplash.com` is blocked by CSP.
+
+**Workaround (Cloudflare Workers adapter):** wrap your worker entrypoint to patch the outbound CSP header on `/_emdash` responses. Patching from Astro user middleware (`src/middleware.ts`) does *not* work — EmDash's middleware runs outside user middleware in the chain and overwrites the header after user middleware returns.
+
+```ts
+// src/worker.ts
+import handler from "@astrojs/cloudflare/entrypoints/server";
+export { PluginBridge } from "@emdash-cms/cloudflare/sandbox";
+
+const wrapped: ExportedHandler = {
+  async fetch(request, env, ctx) {
+    const response = await (handler as any).fetch(request, env, ctx);
+    const url = new URL(request.url);
+    if (!url.pathname.startsWith("/_emdash")) return response;
+
+    const csp = response.headers.get("Content-Security-Policy");
+    if (!csp || csp.includes("images.unsplash.com")) return response;
+
+    const patched = csp
+      .replace(/img-src ([^;]*)/, "img-src $1 https://images.unsplash.com")
+      .replace(/connect-src ([^;]*)/, "connect-src $1 https://api.unsplash.com");
+
+    const newHeaders = new Headers(response.headers);
+    newHeaders.set("Content-Security-Policy", patched);
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: newHeaders,
+    });
+  },
+};
+
+export default wrapped;
+```
+
+You'll also need to point `wrangler.jsonc` at this file (`"main": "./src/worker.ts"`) if it isn't already.
+
 ## Roadmap
 
 - **v0.2**: BYOK OpenAI Images + Replicate AI generation, Pexels + Openverse stock providers.
