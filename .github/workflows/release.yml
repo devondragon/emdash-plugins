@@ -30,7 +30,11 @@ jobs:
           cache: "pnpm"
           registry-url: "https://registry.npmjs.org"
 
-      - run: npm install -g npm@latest --force
+      - name: Install latest npm (OIDC trusted publishing requires >=11.5.1)
+        run: |
+          mkdir -p "$HOME/.npm-global"
+          npm install --prefix "$HOME/.npm-global" npm@latest
+          echo "$HOME/.npm-global/node_modules/.bin" >> "$GITHUB_PATH"
 
       - run: pnpm install --frozen-lockfile
 
