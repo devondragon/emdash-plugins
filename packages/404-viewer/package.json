@@ -1,6 +1,6 @@
 {
   "name": "@devondragon/emdash-plugin-404-viewer",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "EmDash admin plugin: viewer for the built-in 404 log table",
   "license": "MIT",
   "author": "Devon Hillard <devon@devondragon.com>",
