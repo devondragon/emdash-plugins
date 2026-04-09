@@ -42,10 +42,11 @@ export const PLUGIN_ADMIN_ENTRYPOINT =
   "@devondragon/emdash-plugin-featured-image-studio/admin";
 
 /**
- * Descriptor factory — metadata only. The PluginDescriptor type deliberately
- * omits `admin`/`routes`/`hooks` (those belong on the resolved plugin that
- * `createPlugin` builds). The sidebar entries are declared via `adminPages`,
- * which is the surface the descriptor exposes for navigation.
+ * Descriptor factory — metadata only. The `PluginDescriptor` type declares
+ * `adminPages`, but the EmDash runtime sidebar registration also reads
+ * `admin.pages`. We provide both and cast to satisfy the narrower
+ * compile-time type, matching the pattern used by the 404-viewer plugin in
+ * this repo.
  */
 export function featuredImageStudioPlugin(): PluginDescriptor {
   return {
@@ -57,7 +58,10 @@ export function featuredImageStudioPlugin(): PluginDescriptor {
     capabilities: ["network:fetch"],
     allowedHosts: ["api.unsplash.com", "images.unsplash.com"],
     adminPages: [{ path: "/", label: "Image Studio", icon: "image" }],
-  };
+    admin: {
+      pages: [{ path: "/", label: "Image Studio", icon: "image" }],
+    },
+  } as unknown as PluginDescriptor;
 }
 
 /**

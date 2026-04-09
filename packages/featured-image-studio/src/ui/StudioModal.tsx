@@ -34,6 +34,13 @@ export interface StudioPickerProps {
    * stock photo".
    */
   initialTab?: StudioTab;
+  /**
+   * Whether to show the Settings tab. Defaults to true for the standalone
+   * admin page; the FieldWidget passes `false` because plugin-scoped
+   * settings don't belong inside a per-post editor picker (and rendering
+   * SettingsTab there would nest its form inside the outer post form).
+   */
+  showSettings?: boolean;
 }
 
 /**
@@ -47,14 +54,25 @@ export interface StudioPickerProps {
  *    helper. Lives here rather than as a separate sidebar entry so the
  *    scope is unambiguous (it's not site-wide settings).
  */
-export function StudioPicker({ onImported, onLibraryPick, initialTab = "library" }: StudioPickerProps) {
-  const [tab, setTab] = React.useState<StudioTab>(initialTab);
+export function StudioPicker({
+  onImported,
+  onLibraryPick,
+  initialTab = "library",
+  showSettings = true,
+}: StudioPickerProps) {
+  const [tab, setTab] = React.useState<StudioTab>(
+    initialTab === "settings" && !showSettings ? "library" : initialTab,
+  );
 
   // When the parent passes a new initialTab (e.g. user clicked a different
   // button on the field widget), follow it.
   React.useEffect(() => {
-    setTab(initialTab);
-  }, [initialTab]);
+    if (initialTab === "settings" && !showSettings) {
+      setTab("library");
+    } else {
+      setTab(initialTab);
+    }
+  }, [initialTab, showSettings]);
 
   const tabButton = (id: StudioTab, label: string) => (
     <button
@@ -74,7 +92,7 @@ export function StudioPicker({ onImported, onLibraryPick, initialTab = "library"
         {tabButton("library", "Media Library")}
         {tabButton("stock", "Stock (Unsplash)")}
         {tabButton("ai", "AI Generation")}
-        {tabButton("settings", "Settings")}
+        {showSettings && tabButton("settings", "Settings")}
       </div>
 
       {tab === "library" && (
@@ -86,7 +104,7 @@ export function StudioPicker({ onImported, onLibraryPick, initialTab = "library"
       )}
       {tab === "stock" && <StockTab onImported={onImported} />}
       {tab === "ai" && <AiTabComingSoon />}
-      {tab === "settings" && <SettingsTab />}
+      {tab === "settings" && showSettings && <SettingsTab />}
     </>
   );
 }
@@ -99,7 +117,14 @@ export interface StudioModalProps extends StudioPickerProps {
 /**
  * Dialog wrapper used by the field widget. Click-outside / Escape closes.
  */
-export function StudioModal({ open, onClose, onImported, onLibraryPick, initialTab }: StudioModalProps) {
+export function StudioModal({
+  open,
+  onClose,
+  onImported,
+  onLibraryPick,
+  initialTab,
+  showSettings,
+}: StudioModalProps) {
   React.useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -143,6 +168,7 @@ export function StudioModal({ open, onClose, onImported, onLibraryPick, initialT
         <div style={styles.modalContent}>
           <StudioPicker
             initialTab={initialTab}
+            showSettings={showSettings}
             onImported={(result, source) => {
               onImported(result, source);
               onClose();

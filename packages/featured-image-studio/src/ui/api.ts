@@ -110,8 +110,10 @@ export async function importUnsplashPhoto(
 
   const mediaRecord = await uploadBytesToMedia(fetched);
 
-  // Fire-and-forget attribution save — don't block the caller on KV write
-  // latency, but do surface persistent failures via the returned promise.
+  // Persist attribution as part of the blocking import flow so failures
+  // surface to the caller (and a retry can be triggered by re-importing).
+  // KV latency is acceptable here — the full import is already a
+  // multi-step round-trip and users expect it to take a moment.
   await callRoute<{ ok: true }>("unsplash/save-attribution", {
     mediaId: mediaRecord.id,
     alt: fetched.alt,

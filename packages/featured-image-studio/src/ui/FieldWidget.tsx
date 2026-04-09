@@ -1,5 +1,6 @@
 import { Button } from "@cloudflare/kumo";
 import { Image as ImageIcon } from "@phosphor-icons/react";
+import { apiFetch } from "emdash/plugin-utils";
 import * as React from "react";
 import { StudioModal, type StudioTab } from "./StudioModal.js";
 import { styles } from "./styles.js";
@@ -30,6 +31,30 @@ export function FieldWidget(props: FieldWidgetProps) {
   const [open, setOpen] = React.useState(false);
   const [initialTab, setInitialTab] = React.useState<StudioTab>("library");
   const [lastUrl, setLastUrl] = React.useState<string | null>(null);
+
+  // Rehydrate thumbnail URL when `value` is a stored media id. On a fresh
+  // page load `lastUrl` is null, so without this the widget would fall back
+  // to the "id: …" placeholder even though the image exists. We fetch the
+  // single media record from the host API and cache its URL in `lastUrl`.
+  React.useEffect(() => {
+    if (typeof value !== "string" || !value || value.startsWith("http")) return;
+    if (lastUrl) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiFetch(`/_emdash/api/media/${encodeURIComponent(value)}`);
+        if (!res.ok) return;
+        const json = (await res.json()) as { data?: { url?: string } } | null;
+        const url = json?.data?.url ?? null;
+        if (!cancelled && url) setLastUrl(url);
+      } catch {
+        // Non-fatal — leave the "id: …" fallback in place.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [value, lastUrl]);
 
   const displayUrl = lastUrl ?? (typeof value === "string" && value.startsWith("http") ? value : null);
 
@@ -78,6 +103,7 @@ export function FieldWidget(props: FieldWidgetProps) {
       <StudioModal
         open={open}
         initialTab={initialTab}
+        showSettings={false}
         onClose={() => setOpen(false)}
         onImported={(result) => {
           setLastUrl(result.url);

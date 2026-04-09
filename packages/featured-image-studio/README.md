@@ -36,8 +36,9 @@ export default defineConfig({
 
 Then:
 
-1. Open **Plugins → Featured Image Studio → Settings** in the EmDash admin and paste your Unsplash Access Key.
-2. Visit **Plugins → Featured Image Studio → Image Studio** to search and import images directly into the media library.
+1. Open **Plugins → Image Studio** in the EmDash admin and switch to the **Settings** tab to paste your Unsplash Access Key.
+2. Switch to the **Stock (Unsplash)** tab on the same page to search and import images directly into the media library.
+
 ### Using it inside the Post editor
 
 **The post editor does not pick this up automatically.** EmDash stores a per-field `widget` setting in its database and only renders a plugin widget on fields that have been explicitly opted in. The plugin registers the widget name `featured-image-studio:picker`; you still need to bind it to each `image` / `file` field you want it to take over.
@@ -73,9 +74,8 @@ On Cloudflare D1 the same statement runs via `wrangler d1 execute`. Remember to 
 This plugin declares:
 
 - `network:fetch` (restricted to `api.unsplash.com` + `images.unsplash.com`)
-- `write:media`
 
-No access to site content, users, or email.
+Image imports are sent through the authenticated EmDash admin media API (`/_emdash/api/media`); the plugin does not declare or use a separate `write:media` capability. No access to site content, users, or email.
 
 ## Roadmap
 
