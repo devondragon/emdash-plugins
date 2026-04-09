@@ -7,6 +7,7 @@ A monorepo of plugins for [EmDash CMS](https://github.com/emdash-cms/emdash) by 
 | Package | Version | Description |
 | --- | --- | --- |
 | [`@devondragon/emdash-plugin-404-viewer`](./packages/404-viewer) | [![npm](https://img.shields.io/npm/v/@devondragon/emdash-plugin-404-viewer.svg)](https://www.npmjs.com/package/@devondragon/emdash-plugin-404-viewer) | Admin UI for browsing, searching, and pruning the built-in `_emdash_404_log` table. |
+| [`@devondragon/emdash-plugin-featured-image-studio`](./packages/featured-image-studio) | [![npm](https://img.shields.io/npm/v/@devondragon/emdash-plugin-featured-image-studio.svg)](https://www.npmjs.com/package/@devondragon/emdash-plugin-featured-image-studio) | Search Unsplash and import photos (with attribution) into your media library — as a standalone admin page or an in-editor field widget. |
 
 More plugins coming — this repo is the home for everything EmDash-related I publish.
 
