@@ -26,16 +26,10 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "24"
           cache: "pnpm"
 
-      - name: Install latest npm (OIDC trusted publishing requires >=11.5.1)
-        run: |
-          mkdir -p "$HOME/.npm-global"
-          npm install --prefix "$HOME/.npm-global" npm@latest
-          echo "$HOME/.npm-global/bin" >> "$GITHUB_PATH"
-
-      - name: Verify npm version
+      - name: Verify npm version (need >=11.5.1 for OIDC trusted publishing)
         run: npm --version
 
       - run: pnpm install --frozen-lockfile
