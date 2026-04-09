@@ -455,6 +455,13 @@ function DestinationAutosuggest({
 	const [query, setQuery] = React.useState("");
 	const [items, setItems] = React.useState<PostSuggestion[]>([]);
 	const [open, setOpen] = React.useState(false);
+	const blurTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+	React.useEffect(() => {
+		return () => {
+			if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+		};
+	}, []);
 
 	React.useEffect(() => {
 		if (!query.trim()) {
@@ -495,7 +502,10 @@ function DestinationAutosuggest({
 				value={value}
 				onChange={handleChange}
 				onFocus={() => setOpen(true)}
-				onBlur={() => setTimeout(() => setOpen(false), 150)}
+				onBlur={() => {
+					if (blurTimerRef.current) clearTimeout(blurTimerRef.current);
+					blurTimerRef.current = setTimeout(() => setOpen(false), 150);
+				}}
 				disabled={disabled}
 				style={{ width: "100%" }}
 			/>
@@ -594,6 +604,9 @@ function CreateRedirectModal({
 			setError(null);
 			setSuccessNote(null);
 			setSubmitting(false);
+		} else {
+			// Cancel any pending auto-close when the dialog is dismissed manually.
+			if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
 		}
 	}, [open, initialSource]);
 
