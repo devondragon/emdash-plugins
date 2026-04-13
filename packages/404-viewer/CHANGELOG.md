@@ -1,5 +1,11 @@
 # @devondragon/emdash-plugin-404-viewer
 
+## 0.3.1
+
+### Patch Changes
+
+- f6399a3: Relax emdash peer dependency from `^0.1.0` to `>=0.1.0` to support emdash 0.2.0 through 0.4.0+
+
 ## 0.3.0
 
 ### Minor Changes

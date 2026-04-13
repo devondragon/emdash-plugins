@@ -1,5 +1,11 @@
 # @devondragon/emdash-plugin-featured-image-studio
 
+## 0.2.1
+
+### Patch Changes
+
+- f6399a3: Relax emdash peer dependency from `^0.1.0` to `>=0.1.0` to support emdash 0.2.0 through 0.4.0+
+
 ## 0.2.0
 
 ### Minor Changes
