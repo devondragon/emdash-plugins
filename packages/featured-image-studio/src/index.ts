@@ -55,7 +55,7 @@ export function featuredImageStudioPlugin(): PluginDescriptor {
     entrypoint: PLUGIN_ENTRYPOINT,
     format: "native",
     adminEntry: PLUGIN_ADMIN_ENTRYPOINT,
-    capabilities: ["network:fetch"],
+    capabilities: ["network:request"],
     allowedHosts: ["api.unsplash.com", "images.unsplash.com"],
     adminPages: [{ path: "/", label: "Image Studio", icon: "image" }],
     admin: {
@@ -73,7 +73,7 @@ export function createPlugin(): ResolvedPlugin {
   const definition: PluginDefinition = {
     id: PLUGIN_ID,
     version: PLUGIN_VERSION,
-    capabilities: ["network:fetch"],
+    capabilities: ["network:request"],
     allowedHosts: ["api.unsplash.com", "images.unsplash.com"],
     admin: {
       entry: PLUGIN_ADMIN_ENTRYPOINT,

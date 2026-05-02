@@ -2,7 +2,7 @@
  * Route-context helpers.
  *
  * `PluginContext.http` is typed as optional on EmDash's side because it's
- * capability-gated. We declare `network:fetch`, so at runtime it's always
+ * capability-gated. We declare `network:request`, so at runtime it's always
  * present — but TS can't know that. `narrowHttpContext` asserts presence
  * with a `PluginRouteError` so the UI gets a real message if something
  * ever goes sideways.
@@ -26,7 +26,7 @@ export function narrowHttpContext(ctx: PluginContext): UnsplashProviderContext {
   if (!ctx.http) {
     throw new PluginRouteError(
       "CAPABILITY_MISSING",
-      "featured-image-studio: network:fetch capability not provisioned on context.",
+      "featured-image-studio: network:request capability not provisioned on context.",
       500,
     );
   }

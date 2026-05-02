@@ -1,6 +1,6 @@
 {
   "name": "@devondragon/emdash-plugin-featured-image-studio",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "EmDash plugin: unified featured-image picker with stock photo search (Unsplash) and field-widget editor integration. AI generation planned for v0.2.",
   "license": "MIT",
   "author": "Devon Hillard <devon@devondragon.com>",
@@ -57,7 +57,7 @@
     "@cloudflare/kumo": "^1.17.0",
     "@phosphor-icons/react": "^2.1.10",
     "@types/react": "^19.2.14",
-    "emdash": "^0.4.0",
+    "emdash": "^0.9.0",
     "react": "^19.2.4",
     "tsdown": "^0.21.0",
     "typescript": "^5.9.3",
