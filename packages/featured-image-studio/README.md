@@ -77,11 +77,16 @@ This plugin declares:
 
 Image imports are sent through the authenticated EmDash admin media API (`/_emdash/api/media`); the plugin does not declare or use a separate `write:media` capability. No access to site content, users, or email.
 
-## Known issue: CSP blocks Unsplash thumbnails
+## Admin CSP & Unsplash thumbnails
 
-EmDash's admin Content-Security-Policy hardcodes `img-src` to `'self' data: blob:` (plus the marketplace origin) and does **not** extend it based on plugin `allowedHosts` — see [emdash-cms/emdash#415](https://github.com/emdash-cms/emdash/issues/415). Until that is fixed upstream, the Unsplash search tab will render empty tiles in the admin UI (titles and attribution show, but the image areas are blank) because `https://images.unsplash.com` is blocked by CSP.
+Unsplash thumbnails render out of the box on all released EmDash versions — no CSP configuration needed.
 
-**Workaround (Cloudflare Workers adapter):** wrap your worker entrypoint to patch the outbound CSP header on `/_emdash` responses. Patching from Astro user middleware (`src/middleware.ts`) does *not* work — EmDash's middleware runs outside user middleware in the chain and overwrites the header after user middleware returns.
+An early pre-release build of EmDash hardcoded the admin Content-Security-Policy `img-src` to `'self' data: blob:`, which blocked `https://images.unsplash.com` and left blank tiles in the search grid (titles and attribution still showed) — see [emdash-cms/emdash#415](https://github.com/emdash-cms/emdash/issues/415). That is **fixed in every published EmDash release** (0.16.1+): the admin CSP is now `img-src 'self' https: data: blob:`, which allows any HTTPS origin. And because this plugin proxies the Unsplash API server-side (browser calls only ever hit same-origin `/_emdash` routes), `connect-src 'self'` is sufficient — **no worker CSP patching is required.**
+
+<details>
+<summary>Historical workaround (only needed on pre-0.16 EmDash builds)</summary>
+
+If you are pinned to a pre-release EmDash build with the strict `img-src`, wrap your Cloudflare Workers entrypoint to patch the outbound CSP header on `/_emdash` responses. Patching from Astro user middleware (`src/middleware.ts`) does *not* work — EmDash's middleware runs outside user middleware and overwrites the header after user middleware returns.
 
 ```ts
 // src/worker.ts
@@ -114,7 +119,9 @@ const wrapped: ExportedHandler = {
 export default wrapped;
 ```
 
-You'll also need to point `wrangler.jsonc` at this file (`"main": "./src/worker.ts"`) if it isn't already.
+You'll also need to point `wrangler.jsonc` at this file (`"main": "./src/worker.ts"`).
+
+</details>
 
 ## Roadmap
 
