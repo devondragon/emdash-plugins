@@ -29,10 +29,11 @@ jobs:
           node-version: "24"
           cache: "pnpm"
 
-      - name: Upgrade npm (need >=11.5.1 for OIDC trusted publishing)
-        run: |
-          npm install -g npm@latest
-          npm --version
+      # OIDC trusted publishing needs npm >= 11.5.1. Node 24 already bundles a
+      # newer npm (24.18 ships 11.16.0), so we rely on the bundled version.
+      # Do NOT `npm install -g npm@latest` here: the current npm@latest hits
+      # `Cannot find module 'sigstore'` during provenance signing (npm/cli#9722).
+      - run: npm --version
 
       - run: pnpm install --frozen-lockfile
 
