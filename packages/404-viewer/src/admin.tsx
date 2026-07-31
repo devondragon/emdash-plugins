@@ -27,7 +27,10 @@ interface NotFoundEntry {
 interface NotFoundSummary {
 	path: string;
 	count: number;
-	lastSeen: string;
+	// Nullable: the summary endpoint returns MAX(last_seen_at), and rows written
+	// before EmDash 0.31 migration 035 -- or by any writer that doesn't set the
+	// column -- have it NULL.
+	lastSeen: string | null;
 	topReferrer: string | null;
 }
 
@@ -187,8 +190,14 @@ async function searchPostSuggestions(
 // Formatting
 // =============================================================================
 
-function timeAgo(iso: string): string {
-	const ms = Date.now() - new Date(iso).getTime();
+function timeAgo(iso: string | null | undefined): string {
+	// Guard null/undefined and unparseable input: `new Date(null)` is epoch 0,
+	// which used to render as "12/31/1969", and `new Date("nonsense")` is NaN,
+	// which falls through to a literal "Invalid Date".
+	if (!iso) return "—";
+	const time = new Date(iso).getTime();
+	if (Number.isNaN(time)) return "—";
+	const ms = Date.now() - time;
 	const seconds = Math.floor(ms / 1000);
 	if (seconds < 60) return "just now";
 	const minutes = Math.floor(seconds / 60);
