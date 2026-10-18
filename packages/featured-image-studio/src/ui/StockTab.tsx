@@ -88,6 +88,7 @@ export function StockTab({ onImported }: StockTabProps) {
       <div style={styles.searchBar}>
         <Input
           placeholder="Search Unsplash..."
+          aria-label="Search Unsplash"
           value={query}
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}

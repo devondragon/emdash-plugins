@@ -119,6 +119,7 @@ export function SettingsTab() {
         >
           <Input
             type="password"
+            aria-label="Unsplash Access Key"
             placeholder={status?.hasKey ? "Paste a new key to replace…" : "Paste your Access Key"}
             value={draft}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDraft(e.target.value)}
