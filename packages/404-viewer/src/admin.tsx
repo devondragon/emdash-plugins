@@ -61,8 +61,8 @@ interface CreateRedirectInput {
 }
 
 // Subset of GET /_emdash/api/auth/me we actually use.
-// NOTE: role shape is assumed based on plan guidance — core's RoleLevel is
-// numeric with admin == 80. If core changes this, update isAdminRole below.
+// `role` is core's numeric RoleLevel (@emdash-cms/auth `Role`: SUBSCRIBER 10,
+// CONTRIBUTOR 20, AUTHOR 30, EDITOR 40, ADMIN 50). See isAdminRole below.
 interface CurrentUser {
 	id: string;
 	email: string;
@@ -128,7 +128,9 @@ async function fetchLog(opts: {
 	const res = await apiFetch(`${API_BASE}?${params}`);
 	if (!res.ok) throw await apiError("fetch 404 log", res);
 	const json = await res.json();
-	return { items: json.data?.items ?? [], cursor: json.data?.cursor ?? null };
+	// EmDash's cursor-paginated list endpoints return the next page token as
+	// `nextCursor` (omitted on the last page), not `cursor`.
+	return { items: json.data?.items ?? [], cursor: json.data?.nextCursor ?? null };
 }
 
 async function clearAll(): Promise<number> {
@@ -812,9 +814,9 @@ function CreateRedirectModal({
 function isAdminRole(role: string | number | null | undefined): boolean {
 	if (role == null) return false;
 	if (typeof role === "string") return role.toLowerCase() === "admin";
-	// ASSUMPTION: core's RoleLevel uses numeric levels; admin is the highest
-	// common level (80). If core changes this threshold, update here.
-	return role >= 80;
+	// `redirects:manage` requires Role.ADMIN (50) in @emdash-cms/auth. The
+	// server enforces the permission regardless; this only hides the button.
+	return role >= 50;
 }
 
 function NotFoundPage() {

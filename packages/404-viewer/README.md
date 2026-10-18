@@ -4,8 +4,9 @@ EmDash admin plugin that surfaces the built-in `_emdash_404_log` table as a view
 
 ## Requirements
 
-- EmDash `^0.1.0`
+- EmDash `>=1.0.0` (tested against 1.3.0)
 - React `^19`
+- `@cloudflare/kumo` `^2.6.0` (EmDash 1.x ships 2.6.0)
 - An EmDash site backed by Cloudflare D1 (the plugin reads `_emdash_404_log`, which is populated by EmDash's redirect middleware)
 
 ## Installation

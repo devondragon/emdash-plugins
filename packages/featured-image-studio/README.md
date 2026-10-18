@@ -6,7 +6,8 @@ EmDash plugin that turns picking a featured image into a single unified experien
 
 ## Requirements
 
-- EmDash `^0.1.0`
+- EmDash `>=1.0.1` (tested against 1.3.0)
+- `@cloudflare/kumo` `^2.6.0` (provided by EmDash's admin)
 - React `^19`
 - An Unsplash **Access Key** (free tier — [apply here](https://unsplash.com/developers))
 
@@ -48,7 +49,9 @@ The supported path is the EmDash admin UI:
 1. Open **Collections** in the EmDash admin sidebar.
 2. Edit the collection that owns your featured image (e.g. `posts`).
 3. Edit the `image` / `file` field and set its **Widget** to `featured-image-studio:picker`.
-4. Save. Reload the post editor — that field now renders the "Browse / Generate" button that opens the Studio modal.
+4. Save. Reload the post editor — that field now renders the "Media Library" and "Import / Generate" buttons that open the Studio modal.
+
+The widget stores the same value object EmDash's built-in image/file editors write (`{ id, provider: "local", alt, width, height, filename, mimeType, meta: { storageKey } }`), so `<Image image={entry.data.featured_image} />` renders it directly. Versions 0.2.x and earlier stored a bare media ID string; the widget still previews those, and re-picking the image rewrites the value in the new shape.
 
 If you prefer to script it (e.g. in a seed or migration), the same binding can be written directly to the emdash schema table — the field's `widget` column takes the `plugin-id:widget-name` string. For the stock sqlite adapter that is:
 
@@ -73,9 +76,9 @@ On Cloudflare D1 the same statement runs via `wrangler d1 execute`. Remember to 
 
 This plugin declares:
 
-- `network:fetch` (restricted to `api.unsplash.com` + `images.unsplash.com`)
+- `network:request` (restricted to `api.unsplash.com` + `images.unsplash.com`)
 
-Image imports are sent through the authenticated EmDash admin media API (`/_emdash/api/media`); the plugin does not declare or use a separate `write:media` capability. No access to site content, users, or email.
+Image imports are sent through the authenticated EmDash admin media API (`/_emdash/api/media`); the plugin does not declare or use a separate `media:write` capability. No access to site content, users, or email.
 
 ## Admin CSP & Unsplash thumbnails
 
